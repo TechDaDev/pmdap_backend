@@ -16,10 +16,10 @@ facility/location/department/physician metadata, processing status, and active
 or deleted state. `MedicalDocumentEvent` is append-only and records upload,
 metadata update, deletion, duplicate rejection, and integrity checking.
 
-Supported document types are controlled values: laboratory result,
-prescription, radiology, discharge summary, consultation note, vaccination,
-pathology, operative report, referral, insurance, and other. Processing begins
-and remains `UPLOADED` in M6.
+Supported document types are controlled values: laboratory, radiology,
+prescription, consultation, medical report, hospital admission, discharge
+summary, surgery procedure, pathology, vaccination, vital signs, and other.
+Processing begins and remains `UPLOADED` in M6.
 
 An upload-supplied date is `USER_ENTERED` and verified. A later changed date is
 `USER_CORRECTED` and verified. Clearing the date clears its source and

@@ -43,11 +43,15 @@ services:
       DJANGO_CACHE_URL: redis://redis:6379/2
       IDENTITY_FILE_ROOT: /var/lib/pmdap/identity
       IDENTITY_FILE_MAX_BYTES: ${IDENTITY_FILE_MAX_BYTES:-10485760}
+      MEDICAL_FILE_ROOT: /var/lib/pmdap/medical
+      MEDICAL_FILE_MAX_BYTES: ${MEDICAL_FILE_MAX_BYTES:-26214400}
+      MEDICAL_IMAGE_MAX_PIXELS: ${MEDICAL_IMAGE_MAX_PIXELS:-40000000}
     ports:
       - "8000:8000"
     volumes:
       - .:/app
       - identity_files:/var/lib/pmdap/identity
+      - medical_files:/var/lib/pmdap/medical
     depends_on:
       db:
         condition: service_healthy
@@ -73,6 +77,7 @@ services:
     environment: *app-environment
     volumes:
       - .:/app
+      - medical_files:/var/lib/pmdap/medical
     depends_on:
       db:
         condition: service_healthy
@@ -84,3 +89,4 @@ volumes:
   postgres_data:
   redis_data:
   identity_files:
+  medical_files:
