@@ -1,0 +1,16 @@
+.git
+.gitignore
+.venv
+__pycache__
+*.pyc
+.coverage
+coverage.xml
+htmlcov
+.pytest_cache
+.ruff_cache
+.env
+.qodo
+.codebase-memory
+db.sqlite3
+media
+staticfiles
