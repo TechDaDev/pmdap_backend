@@ -116,6 +116,10 @@ STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
+IDENTITY_FILE_ROOT = Path(
+    os.getenv("IDENTITY_FILE_ROOT", BASE_DIR / "private" / "identity")
+)
+IDENTITY_FILE_MAX_BYTES = int(os.getenv("IDENTITY_FILE_MAX_BYTES", 10 * 1024 * 1024))
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
@@ -147,6 +151,10 @@ SPECTACULAR_SETTINGS = {
     "DESCRIPTION": "Versioned patient medical archive API.",
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
+    "COMPONENT_SPLIT_REQUEST": True,
+    "ENUM_NAME_OVERRIDES": {
+        "IdentityDocumentType": "identities.models.IdentityDocument.DocumentType",
+    },
 }
 
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")

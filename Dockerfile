@@ -14,6 +14,8 @@ RUN python -m pip install --upgrade pip && \
 
 COPY --chown=app:app . .
 
+RUN mkdir -p /var/lib/pmdap/identity && chown app:app /var/lib/pmdap/identity
+
 USER app
 
 EXPOSE 8000

@@ -17,6 +17,7 @@ venv/
 *.log
 db.sqlite3
 media/
+private/
 staticfiles/
 
 # Environment and secrets

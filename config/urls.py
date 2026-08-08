@@ -9,6 +9,11 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/v1/auth/", include("accounts.urls")),
     path("api/v1/patients/", include("patients.urls")),
+    path("api/v1/identity-documents/", include("identities.urls")),
+    path(
+        "api/v1/verification/identity-documents/",
+        include("identities.verification_urls"),
+    ),
     path("api/v1/health/", HealthView.as_view(), name="health"),
     path(
         "api/v1/schema/",
