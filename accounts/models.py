@@ -18,6 +18,7 @@ class User(AbstractUser):
 
     class Status(models.TextChoices):
         PENDING = "PENDING", "Pending"
+        PENDING_ACTIVATION = "PENDING_ACTIVATION", "Pending activation"
         ACTIVE = "ACTIVE", "Active"
         SUSPENDED = "SUSPENDED", "Suspended"
         DISABLED = "DISABLED", "Disabled"
@@ -27,7 +28,7 @@ class User(AbstractUser):
     email = models.EmailField(unique=True)
     phone = models.CharField(max_length=32, blank=True)
     role = models.CharField(max_length=32, choices=Role, default=Role.PATIENT)
-    status = models.CharField(max_length=16, choices=Status, default=Status.PENDING)
+    status = models.CharField(max_length=24, choices=Status, default=Status.PENDING)
     email_verified = models.BooleanField(default=False)
     phone_verified = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)

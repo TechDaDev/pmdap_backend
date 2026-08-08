@@ -8,12 +8,17 @@ from common.api import HealthView
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/v1/auth/", include("accounts.urls")),
+    path("api/v1/account-claims/", include("claims.urls")),
     path("api/v1/patients/", include("patients.urls")),
     path("api/v1/identity-documents/", include("identities.urls")),
     path("api/v1/minors/", include("guardians.urls")),
     path(
         "api/v1/verification/identity-documents/",
         include("identities.verification_urls"),
+    ),
+    path(
+        "api/v1/verification/account-claims/",
+        include("claims.verification_urls"),
     ),
     path(
         "api/v1/verification/guardian-relationships/",

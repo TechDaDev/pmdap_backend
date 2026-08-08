@@ -120,6 +120,9 @@ IDENTITY_FILE_ROOT = Path(
     os.getenv("IDENTITY_FILE_ROOT", BASE_DIR / "private" / "identity")
 )
 IDENTITY_FILE_MAX_BYTES = int(os.getenv("IDENTITY_FILE_MAX_BYTES", 10 * 1024 * 1024))
+ACCOUNT_CLAIM_ACTIVATION_MINUTES = int(
+    os.getenv("ACCOUNT_CLAIM_ACTIVATION_MINUTES", "30")
+)
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
@@ -132,6 +135,8 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         "auth_register": "5/hour",
         "auth_login": "10/minute",
+        "account_claim_submit": "5/hour",
+        "account_claim_activation": "10/hour",
     },
     "EXCEPTION_HANDLER": "common.exceptions.api_exception_handler",
 }
@@ -152,6 +157,17 @@ SPECTACULAR_SETTINGS = {
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
     "COMPONENT_SPLIT_REQUEST": True,
+    "ENUM_NAME_OVERRIDES": {
+        "AccountClaimStatusEnum": "claims.models.PatientAccountClaim.Status",
+        "AccountClaimComparisonEnum": "claims.models.PatientAccountClaim.Comparison",
+        "ClaimEvidenceDocumentTypeEnum": (
+            "claims.models.ClaimIdentityEvidence.DocumentType"
+        ),
+        "IdentityDocumentTypeEnum": "identities.models.IdentityDocument.DocumentType",
+        "IdentityDocumentLifecycleStatusEnum": (
+            "identities.models.IdentityDocument.LifecycleStatus"
+        ),
+    },
 }
 
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
