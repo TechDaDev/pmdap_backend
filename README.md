@@ -5,9 +5,8 @@ Django REST Framework, PostgreSQL, Redis, Celery, and versioned REST APIs.
 
 ## Delivery status
 
-Project specification approved. M0 foundation is next. M1 and later phases are
-blocked until M0 acceptance passes and the project owner explicitly approves
-continuation.
+M0 foundation implemented. M1 and later phases remain blocked until M0
+acceptance is reported and the project owner explicitly approves continuation.
 
 ## Authoritative documents
 
@@ -22,3 +21,57 @@ Phase 1 archives patient medical documents. It does not provide doctor access,
 AI/LLM interpretation, diagnosis extraction, treatment recommendations,
 appointments, billing, insurance, hospital management, telemedicine, or
 analytics dashboards.
+
+## Local test setup
+
+Requires Python 3.12+.
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements/dev.txt
+.venv/bin/pytest
+```
+
+Quality and framework checks:
+
+```bash
+.venv/bin/ruff check .
+.venv/bin/ruff format --check .
+.venv/bin/python manage.py check --settings=config.settings.test
+.venv/bin/python manage.py makemigrations --check --dry-run \
+  --settings=config.settings.test
+```
+
+## Docker Compose
+
+Requires Docker with Compose. Create local environment file, then replace every
+`replace-with-...` placeholder. Never commit `.env`.
+
+```bash
+cp .env.example .env
+docker compose up -d --build
+docker compose ps
+```
+
+Services:
+
+- API: `http://localhost:8000`
+- Health: `http://localhost:8000/api/v1/health/`
+- OpenAPI: `http://localhost:8000/api/v1/schema/`
+- Swagger UI: `http://localhost:8000/api/v1/docs/`
+- PostgreSQL and Redis: container-network only; no host ports exposed
+
+Useful verification:
+
+```bash
+docker compose exec web python manage.py migrate --check
+docker compose exec redis redis-cli ping
+docker compose exec worker celery -A config inspect ping --timeout 5
+docker compose logs web worker
+```
+
+Stop services without deleting persistent data:
+
+```bash
+docker compose down
+```
