@@ -8,6 +8,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from accounts.services import issue_tokens, normalize_email, register_account
 from common.exceptions import AccountUnavailable
+from patients.serializers import PatientProfileInputSerializer
 
 User = get_user_model()
 
@@ -41,6 +42,7 @@ class RegisterSerializer(RejectUnknownFieldsMixin, serializers.Serializer):
     email = serializers.EmailField()
     phone = serializers.CharField(required=False, allow_blank=True, max_length=32)
     password = serializers.CharField(write_only=True, trim_whitespace=False)
+    patient = PatientProfileInputSerializer(write_only=True)
 
     def validate_email(self, value):
         value = normalize_email(value)

@@ -4,6 +4,7 @@ from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from common.exceptions import InvalidCredentials
+from patients.services import create_patient_profile
 
 
 def normalize_email(email):
@@ -11,10 +12,10 @@ def normalize_email(email):
 
 
 @transaction.atomic
-def register_account(*, email, password, phone=""):
+def register_account(*, email, password, patient, phone=""):
     user_model = get_user_model()
     try:
-        return user_model.objects.create_user(
+        user = user_model.objects.create_user(
             email=email,
             password=password,
             phone=phone,
@@ -30,6 +31,8 @@ def register_account(*, email, password, phone=""):
         raise serializers.ValidationError(
             {"email": ["An account with this email already exists."]}
         ) from exc
+    create_patient_profile(user=user, **patient)
+    return user
 
 
 def issue_tokens(*, email, password):
