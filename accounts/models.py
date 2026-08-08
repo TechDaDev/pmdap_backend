@@ -1,0 +1,41 @@
+import uuid
+
+from django.contrib.auth.models import AbstractUser
+from django.db import models
+
+from accounts.managers import UserManager
+
+
+class User(AbstractUser):
+    class Role(models.TextChoices):
+        PATIENT = "PATIENT", "Patient"
+        IDENTITY_VERIFICATION_AGENT = (
+            "IDENTITY_VERIFICATION_AGENT",
+            "Identity verification agent",
+        )
+        ADMIN = "ADMIN", "Admin"
+
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        ACTIVE = "ACTIVE", "Active"
+        SUSPENDED = "SUSPENDED", "Suspended"
+        DISABLED = "DISABLED", "Disabled"
+
+    username = None
+    uuid = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    email = models.EmailField(unique=True)
+    phone = models.CharField(max_length=32, blank=True)
+    role = models.CharField(max_length=32, choices=Role, default=Role.PATIENT)
+    status = models.CharField(max_length=16, choices=Status, default=Status.PENDING)
+    email_verified = models.BooleanField(default=False)
+    phone_verified = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    USERNAME_FIELD = "email"
+    REQUIRED_FIELDS = []
+
+    objects = UserManager()
+
+    def __str__(self):
+        return self.email
