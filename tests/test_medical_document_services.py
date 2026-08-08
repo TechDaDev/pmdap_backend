@@ -1,16 +1,22 @@
+import hashlib
 import io
 from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError
 from django.test import override_settings
 from PIL import Image
 
 from accounts.models import User
-from documents.exceptions import DuplicateMedicalDocument, MedicalDocumentNotFound
+from documents.exceptions import (
+    DuplicateMedicalDocument,
+    MedicalDocumentNotFound,
+    MedicalFileStorageFailed,
+)
 from documents.models import MedicalDocument, MedicalDocumentEvent, StoredFile
 from documents.services import (
     create_medical_document,
@@ -176,3 +182,78 @@ def test_stale_update_and_repeated_delete_cannot_mutate_deleted_document(tmp_pat
         ).count()
         == 1
     )
+
+
+def test_post_write_integrity_mismatch_rolls_back_rows_and_blob(tmp_path):
+    actor, patient = actor_and_patient()
+    with (
+        override_settings(MEDICAL_FILE_ROOT=tmp_path),
+        patch("documents.services._stored_digest", return_value="b" * 64),
+        pytest.raises(MedicalFileStorageFailed),
+    ):
+        create(patient=patient, actor=actor)
+
+    assert not StoredFile.objects.exists()
+    assert not MedicalDocument.objects.exists()
+    assert not [path for path in tmp_path.rglob("*") if path.is_file()]
+
+
+def test_event_failure_rolls_back_document_file_row_and_blob(tmp_path):
+    actor, patient = actor_and_patient()
+    with (
+        override_settings(MEDICAL_FILE_ROOT=tmp_path),
+        patch(
+            "documents.services._record_event",
+            side_effect=RuntimeError("event failed"),
+        ),
+        pytest.raises(RuntimeError, match="event failed"),
+    ):
+        create(patient=patient, actor=actor)
+
+    assert not StoredFile.objects.exists()
+    assert not MedicalDocument.objects.exists()
+    assert not [path for path in tmp_path.rglob("*") if path.is_file()]
+
+
+def test_clearing_manual_date_resets_provenance_and_empty_patch_is_noop(tmp_path):
+    actor, patient = actor_and_patient()
+    with override_settings(MEDICAL_FILE_ROOT=tmp_path):
+        document = create(
+            patient=patient,
+            actor=actor,
+            document_date=date(2026, 8, 1),
+        )
+        document = update_medical_document(
+            document=document,
+            actor=actor,
+            metadata={"document_date": None},
+        )
+        event_count = document.events.count()
+        document = update_medical_document(
+            document=document,
+            actor=actor,
+            metadata={},
+        )
+
+    assert document.document_date is None
+    assert document.date_source == ""
+    assert document.date_verified is False
+    assert document.date_verified_at is None
+    assert document.events.count() == event_count
+
+
+def test_integrity_service_supports_unattached_stored_file(tmp_path):
+    content = png_bytes()
+    with override_settings(MEDICAL_FILE_ROOT=tmp_path):
+        stored = StoredFile(
+            original_filename="orphan.png",
+            mime_type="image/png",
+            size_bytes=len(content),
+            sha256=hashlib.sha256(content).hexdigest(),
+        )
+        stored.file.save("medical/orphan.png", ContentFile(content), save=False)
+        stored.save()
+        verified = verify_stored_file_integrity(stored)
+
+    assert verified.integrity_status == StoredFile.IntegrityStatus.VALID
+    assert not MedicalDocumentEvent.objects.exists()
