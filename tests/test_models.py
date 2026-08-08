@@ -24,6 +24,7 @@ def test_user_uses_generated_uuid_and_unique_email():
     assert user_model._meta.get_field("email").unique is True
     assert user_model.USERNAME_FIELD == "email"
     assert "username" not in [field.name for field in user_model._meta.fields]
+    assert str(user) == user.email
 
 
 @pytest.mark.django_db
@@ -31,3 +32,48 @@ def test_user_factory_hashes_password():
     user = UserFactory(password="correct horse battery staple")
 
     assert user.check_password("correct horse battery staple") is True
+
+
+@pytest.mark.django_db
+def test_user_manager_requires_email():
+    user_model = get_user_model()
+
+    with pytest.raises(ValueError, match="Email is required"):
+        user_model.objects.create_user(email="", password="StrongPassword123!")
+
+
+@pytest.mark.django_db
+def test_user_manager_normalizes_email_domain():
+    user_model = get_user_model()
+
+    user = user_model.objects.create_user(
+        email="Person@EXAMPLE.COM", password="StrongPassword123!"
+    )
+
+    assert user.email == "Person@example.com"
+
+
+@pytest.mark.django_db
+def test_user_manager_creates_superuser_with_required_flags():
+    user_model = get_user_model()
+
+    user = user_model.objects.create_superuser(
+        email="admin@example.com", password="StrongPassword123!"
+    )
+
+    assert user.is_staff is True
+    assert user.is_superuser is True
+    assert user.is_active is True
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("field", ["is_staff", "is_superuser"])
+def test_user_manager_rejects_invalid_superuser_flags(field):
+    user_model = get_user_model()
+
+    with pytest.raises(ValueError, match=f"{field}=True"):
+        user_model.objects.create_superuser(
+            email=f"{field}@example.com",
+            password="StrongPassword123!",
+            **{field: False},
+        )
