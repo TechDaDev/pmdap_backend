@@ -1,5 +1,5 @@
 from django.contrib import admin
-from django.urls import path
+from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from rest_framework.permissions import AllowAny
 
@@ -7,6 +7,7 @@ from common.api import HealthView
 
 urlpatterns = [
     path("admin/", admin.site.urls),
+    path("api/v1/auth/", include("accounts.urls")),
     path("api/v1/health/", HealthView.as_view(), name="health"),
     path(
         "api/v1/schema/",
