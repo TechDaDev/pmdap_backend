@@ -5,13 +5,14 @@ Django REST Framework, PostgreSQL, Redis, Celery, and versioned REST APIs.
 
 ## Delivery status
 
-M0 foundation implemented. M1 and later phases remain blocked until M0
-acceptance is reported and the project owner explicitly approves continuation.
+M0-M2 accepted. M3 identity-document verification is implemented locally and
+awaits project-owner acceptance. M4 and later phases remain blocked.
 
 ## Authoritative documents
 
 - [Phase 1 scope](docs/specification/phase-1-scope.md)
 - [M0 foundation design](docs/superpowers/specs/2026-08-08-m0-project-foundation-design.md)
+- [M3 identity-document design](docs/superpowers/specs/2026-08-08-m3-identity-documents-design.md)
 - [Architecture decisions](docs/architecture/README.md)
 - [Contributor and agent rules](AGENTS.md)
 
@@ -60,6 +61,7 @@ Services:
 - OpenAPI: `http://localhost:8000/api/v1/schema/`
 - Swagger UI: `http://localhost:8000/api/v1/docs/`
 - PostgreSQL and Redis: container-network only; no host ports exposed
+- Identity images: private persistent volume; authorized API streaming only
 
 Useful verification:
 

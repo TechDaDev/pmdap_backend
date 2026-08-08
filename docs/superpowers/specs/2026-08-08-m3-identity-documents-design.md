@@ -30,6 +30,9 @@ Birth and other government IDs are recordable without child workflow.
 - `POST /api/v1/verification/identity-documents/{uuid}/reject/`: reason required.
 
 Exact verification-agent role required. Patient and ADMIN roles are denied.
+Repeating approval by the same agent is an idempotent read of the verified
+state. Approval by a different agent, approval after rejection, and repeated
+rejection return a transition conflict.
 
 ## Data and response rules
 
