@@ -1,0 +1,8 @@
+-r base.txt
+
+Faker==40.36.0
+factory-boy==3.3.3
+pytest==9.1.1
+pytest-cov==7.1.0
+pytest-django==4.13.0
+ruff==0.16.2
