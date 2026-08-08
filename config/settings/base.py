@@ -120,6 +120,11 @@ IDENTITY_FILE_ROOT = Path(
     os.getenv("IDENTITY_FILE_ROOT", BASE_DIR / "private" / "identity")
 )
 IDENTITY_FILE_MAX_BYTES = int(os.getenv("IDENTITY_FILE_MAX_BYTES", 10 * 1024 * 1024))
+MEDICAL_FILE_ROOT = Path(
+    os.getenv("MEDICAL_FILE_ROOT", BASE_DIR / "private" / "medical")
+)
+MEDICAL_FILE_MAX_BYTES = int(os.getenv("MEDICAL_FILE_MAX_BYTES", 25 * 1024 * 1024))
+MEDICAL_IMAGE_MAX_PIXELS = int(os.getenv("MEDICAL_IMAGE_MAX_PIXELS", 40_000_000))
 ACCOUNT_CLAIM_ACTIVATION_MINUTES = int(
     os.getenv("ACCOUNT_CLAIM_ACTIVATION_MINUTES", "30")
 )
@@ -137,6 +142,7 @@ REST_FRAMEWORK = {
         "auth_login": "10/minute",
         "account_claim_submit": "5/hour",
         "account_claim_activation": "10/hour",
+        "medical_document_upload": "20/hour",
     },
     "EXCEPTION_HANDLER": "common.exceptions.api_exception_handler",
 }
@@ -164,6 +170,7 @@ SPECTACULAR_SETTINGS = {
             "claims.models.ClaimIdentityEvidence.DocumentType"
         ),
         "IdentityDocumentTypeEnum": "identities.models.IdentityDocument.DocumentType",
+        "MedicalDocumentTypeEnum": "documents.models.MedicalDocument.DocumentType",
         "IdentityDocumentLifecycleStatusEnum": (
             "identities.models.IdentityDocument.LifecycleStatus"
         ),
