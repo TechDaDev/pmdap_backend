@@ -1,6 +1,5 @@
 from django.apps import apps
 
-
 PROJECT_APPS = (
     "accounts",
     "patients",

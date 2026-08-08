@@ -14,17 +14,3 @@ skip_covered = True
 exclude_lines =
     pragma: no cover
     if __name__ == .__main__.:
-*** Add File: .env.example
-DJANGO_SETTINGS_MODULE=config.settings.local
-DJANGO_SECRET_KEY=replace-with-a-long-random-value
-DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
-DJANGO_CSRF_TRUSTED_ORIGINS=
-
-POSTGRES_DB=pmdap
-POSTGRES_USER=pmdap
-POSTGRES_PASSWORD=replace-with-a-strong-database-password
-POSTGRES_HOST=db
-POSTGRES_PORT=5432
-
-CELERY_BROKER_URL=redis://redis:6379/0
-CELERY_RESULT_BACKEND=redis://redis:6379/1
