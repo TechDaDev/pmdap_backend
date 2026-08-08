@@ -38,13 +38,13 @@ drf-spectacular, pytest, Docker Compose.
 - Constraints: one active guardian/minor/relationship tuple and one creation key
   per guardian.
 
-- [ ] Write model tests for controlled choices, protected history, immutable
+- [x] Write model tests for controlled choices, protected history, immutable
   event records, relationships without minor users, and both uniqueness rules.
-- [ ] Run `pytest tests/test_minors_guardians.py -q --no-cov -x`; expect missing
+- [x] Run `pytest tests/test_minors_guardians.py -q --no-cov -x`; expect missing
   guardian models.
-- [ ] Add minimal models and generate migration with
+- [x] Add minimal models and generate migration with
   `python manage.py makemigrations guardians`.
-- [ ] Run model tests until green; inspect migration constraints with
+- [x] Run model tests until green; inspect migration constraints with
   `python manage.py sqlmigrate guardians 0001 --settings=config.settings.test`.
 
 ### Task 2: Guardian eligibility and live authority
@@ -59,10 +59,10 @@ drf-spectacular, pytest, Docker Compose.
 - Produces: `guardian_relationship(user, minor, *, require_verified=True)`.
 - Produces: `guardian_can_manage_minor(user, minor) -> bool`.
 
-- [ ] Write RED tests for role, account state, owned adult verified profile,
+- [x] Write RED tests for role, account state, owned adult verified profile,
   verified-current National Card, pending/rejected states, and exact birthday.
-- [ ] Implement policy queries with current-state checks and optional row locks.
-- [ ] Verify policy tests, including no access from UUID, Digital ID, or family
+- [x] Implement policy queries with current-state checks and optional row locks.
+- [x] Verify policy tests, including no access from UUID, Digital ID, or family
   number alone.
 
 ### Task 3: Transactional idempotent minor creation
@@ -79,13 +79,13 @@ drf-spectacular, pytest, Docker Compose.
   `identities.services.submit_identity_document`.
 - Produces storage-reference cleanup helpers for outer transaction rollback.
 
-- [ ] Write RED tests for valid National Card/Birth Document creation, minor age
+- [x] Write RED tests for valid National Card/Birth Document creation, minor age
   boundaries, one Digital ID, atomic rollback, storage cleanup, primary-document
   allowlist, family result, and idempotency replay/conflict.
-- [ ] Implement canonical fingerprint using normalized fields and validated file
+- [x] Implement canonical fingerprint using normalized fields and validated file
   SHA-256 values; require 1-128 character `Idempotency-Key`.
-- [ ] Implement one outer transaction and explicit blob cleanup on failure.
-- [ ] Verify zero orphan profiles/documents/relationships/files after injected
+- [x] Implement one outer transaction and explicit blob cleanup on failure.
+- [x] Verify zero orphan profiles/documents/relationships/files after injected
   failure and one result after replay.
 
 ### Task 4: Minor identity verification and M3 authorization reuse
@@ -101,13 +101,13 @@ drf-spectacular, pytest, Docker Compose.
   minor but never an adult.
 - Produces: `guardian_document_access(user, document) -> bool`.
 
-- [ ] Write RED tests for Birth Document verification, adult passport/card rules
+- [x] Write RED tests for Birth Document verification, adult passport/card rules
   unchanged, guardian document detail/image/replacement, pending/rejected/
   unrelated/adult-boundary denial, actor event, and replacement continuity.
-- [ ] Extend central M3 state calculation using PatientProfile `is_minor`.
-- [ ] Extend only M3 detail/image/replace object authorization; preserve direct
+- [x] Extend central M3 state calculation using PatientProfile `is_minor`.
+- [x] Extend only M3 detail/image/replace object authorization; preserve direct
   owner collection behavior.
-- [ ] Run all M3 plus M4 identity tests until green.
+- [x] Run all M3 plus M4 identity tests until green.
 
 ### Task 5: Minor and relationship verification APIs
 
@@ -125,13 +125,13 @@ drf-spectacular, pytest, Docker Compose.
   private evidence-stream routes.
 - Reuses shared envelopes and M3 multipart/file schemas.
 
-- [ ] Write RED API tests covering stable errors, mass assignment, pagination,
+- [x] Write RED API tests covering stable errors, mass assignment, pagination,
   IDOR, pending restrictions, queue projections, evidence access, decisions,
   unsupported methods, and exact response fields.
-- [ ] Implement serializers with unknown-field rejection and distinct summary,
+- [x] Implement serializers with unknown-field rejection and distinct summary,
   guardian detail, agent queue, and agent evidence views.
-- [ ] Implement service-controlled decisions and explicit OpenAPI operations.
-- [ ] Run M4 API/OpenAPI tests and `manage.py spectacular --validate` until clean.
+- [x] Implement service-controlled decisions and explicit OpenAPI operations.
+- [x] Run M4 API/OpenAPI tests and `manage.py spectacular --validate` until clean.
 
 ### Task 6: Multiple guardians and relationship lifecycle
 
@@ -144,12 +144,12 @@ drf-spectacular, pytest, Docker Compose.
   relationships without exposing a broad staff CRUD API.
 - Approval/rejection operate on locked records and preserve history.
 
-- [ ] Write RED tests for independent father/mother review, duplicate blocking,
+- [x] Write RED tests for independent father/mother review, duplicate blocking,
   rejection isolation, private-account non-disclosure, guardian suspension, and
   approval after adulthood.
-- [ ] Implement minimal internal relationship service and deterministic decision
+- [x] Implement minimal internal relationship service and deterministic decision
   conflicts.
-- [ ] Verify relationship and authorization branches are effectively complete.
+- [x] Verify relationship and authorization branches are effectively complete.
 
 ### Task 7: PostgreSQL concurrency lane
 
@@ -162,12 +162,12 @@ drf-spectacular, pytest, Docker Compose.
 - Marker: `postgresql`; tests skip unless `connection.vendor == "postgresql"`.
 - Uses separate thread-local Django DB connections.
 
-- [ ] Write three concurrency tests for M3 replacement approval, guardian
+- [x] Write three concurrency tests for M3 replacement approval, guardian
   approval, and idempotent duplicate creation.
-- [ ] Run SQLite collection and verify PostgreSQL tests skip explicitly.
-- [ ] Start Compose PostgreSQL/Redis with test-only credentials and run marked
-  tests inside web container using `config.settings.postgres_test`.
-- [ ] Record exact executed pass/fail/skip counts; never infer concurrency success.
+- [x] Run SQLite collection and verify PostgreSQL tests skip explicitly.
+- [x] Start an isolated PostgreSQL 17 container with test-only credentials and run
+  marked tests from the host using `config.settings.postgres_test`.
+- [x] Record exact executed pass/fail/skip counts; never infer concurrency success.
 
 ### Task 8: Acceptance and commits
 
@@ -175,10 +175,10 @@ drf-spectacular, pytest, Docker Compose.
 - Modify: `README.md`
 - Modify: this plan checklist after evidence exists.
 
-- [ ] Run targeted M4 tests, full branch-aware pytest, Ruff check/format, Django
+- [x] Run targeted M4 tests, full branch-aware pytest, Ruff check/format, Django
   checks, migration drift, OpenAPI validation, Compose validation, and actual
   PostgreSQL concurrency tests.
-- [ ] Review authorization, age boundary, transaction rollback, storage cleanup,
+- [x] Review authorization, age boundary, transaction rollback, storage cleanup,
   PII projections, migration constraints, and M5+ scope exclusion.
-- [ ] Create clean conventional M4 commits, verify clean worktree and Git state,
+- [x] Create clean conventional M4 commits, verify clean worktree and Git state,
   report required evidence, and stop before M5.
