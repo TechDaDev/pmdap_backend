@@ -43,14 +43,14 @@ def test_user_manager_requires_email():
 
 
 @pytest.mark.django_db
-def test_user_manager_normalizes_email_domain():
+def test_user_manager_normalizes_entire_email():
     user_model = get_user_model()
 
     user = user_model.objects.create_user(
         email="Person@EXAMPLE.COM", password="StrongPassword123!"
     )
 
-    assert user.email == "Person@example.com"
+    assert user.email == "person@example.com"
 
 
 @pytest.mark.django_db
