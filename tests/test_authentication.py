@@ -40,6 +40,13 @@ def register(api_client, **overrides):
         "email": "adult@example.com",
         "phone": "+9647700000000",
         "password": PASSWORD,
+        "patient": {
+            "full_name": "Adult Patient",
+            "date_of_birth": "1990-05-20",
+            "sex": "UNSPECIFIED",
+            "nationality": "IQ",
+            "blood_group": "UNKNOWN",
+        },
     }
     payload.update(overrides)
     return api_client.post(REGISTER, payload, format="json")
