@@ -98,8 +98,8 @@ Legal guardians ignore family-number matching and require official evidence.
 ## Verification behavior
 
 - Same-agent repeated approval is idempotent.
-- Another-agent approval after a decision, approval after rejection, or repeated
-  rejection returns transition conflict.
+- An exact same-agent decision replay is idempotent. A different or conflicting
+  decision after finalization returns transition conflict.
 - Rejection preserves minor profile, Digital ID, documents, evidence, and event
   history while denying rejected guardian access.
 - Multiple guardians may hold independently reviewed relationships. Conditional

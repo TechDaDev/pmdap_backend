@@ -51,13 +51,23 @@ def require_verification_agent(user):
 
 
 def patient_document(user, document_uuid):
-    profile = owned_profile(user)
+    from guardians.services import guardian_can_access_minor
+    from patients.api import require_patient
+    from patients.models import PatientProfile
+
+    require_patient(user)
     try:
-        return IdentityDocument.objects.select_related(
+        document = IdentityDocument.objects.select_related(
             "front_image", "back_image", "replaces"
-        ).get(uuid=document_uuid, patient=profile)
+        ).get(uuid=document_uuid)
     except (IdentityDocument.DoesNotExist, ValueError) as exc:
         raise IdentityDocumentNotFound() from exc
+    owns_document = PatientProfile.objects.filter(
+        user=user, pk=document.patient_id
+    ).exists()
+    if owns_document or guardian_can_access_minor(user, document.patient):
+        return document
+    raise IdentityDocumentNotFound()
 
 
 def verification_document(user, document_uuid):

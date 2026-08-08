@@ -17,7 +17,9 @@ class RejectUnknownFieldsMixin:
 
 
 class IdentityDocumentInputSerializer(RejectUnknownFieldsMixin, serializers.Serializer):
-    document_type = serializers.ChoiceField(choices=IdentityDocument.DocumentType)
+    document_type = serializers.ChoiceField(
+        choices=IdentityDocument.DocumentType.choices
+    )
     document_number = serializers.CharField(max_length=128)
     national_number = serializers.CharField(
         max_length=128, required=False, allow_blank=True, default=""
@@ -54,7 +56,10 @@ class IdentityDocumentInputSerializer(RejectUnknownFieldsMixin, serializers.Seri
         if document_type == IdentityDocument.DocumentType.UNIFIED_NATIONAL_CARD:
             if "issuing_country" not in attrs:
                 attrs["issuing_country"] = "IQ"
-            for field in ("national_number", "family_number", "back_image"):
+            required_fields = ["national_number", "back_image"]
+            if not self.context.get("minor_creation"):
+                required_fields.append("family_number")
+            for field in required_fields:
                 if not attrs.get(field):
                     errors[field] = ["This field is required for a National Card."]
             if attrs["issuing_country"] != "IQ":
@@ -147,7 +152,7 @@ class VerificationQueueFilterSerializer(
     RejectUnknownFieldsMixin, serializers.Serializer
 ):
     status = serializers.ChoiceField(
-        choices=IdentityDocument.VerificationStatus, required=False
+        choices=IdentityDocument.VerificationStatus.choices, required=False
     )
 
 

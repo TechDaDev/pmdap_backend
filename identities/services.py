@@ -83,6 +83,15 @@ def _persist_file(validated):
     return identity_file
 
 
+def persist_identity_upload(upload):
+    return _persist_file(inspect_identity_upload(upload))
+
+
+def delete_identity_file_from_storage(identity_file):
+    if identity_file and identity_file.file.name:
+        identity_file.file.storage.delete(identity_file.file.name)
+
+
 def _record_event(document, event_type, actor):
     return IdentityDocumentEvent.objects.create(
         document=document,
@@ -93,21 +102,23 @@ def _record_event(document, event_type, actor):
 
 
 def _sync_profile_identity_status(profile):
-    cards = IdentityDocument.objects.filter(
-        patient=profile,
-        document_type=IdentityDocument.DocumentType.UNIFIED_NATIONAL_CARD,
+    primary_types = [IdentityDocument.DocumentType.UNIFIED_NATIONAL_CARD]
+    if profile.is_minor:
+        primary_types.append(IdentityDocument.DocumentType.BIRTH_DOCUMENT)
+    documents = IdentityDocument.objects.filter(
+        patient=profile, document_type__in=primary_types
     )
-    if cards.filter(
+    if documents.filter(
         status=IdentityDocument.LifecycleStatus.CURRENT,
         verification_status=IdentityDocument.VerificationStatus.VERIFIED,
     ).exists():
         new_status = PatientProfile.IdentityStatus.VERIFIED
-    elif cards.filter(
+    elif documents.filter(
         status=IdentityDocument.LifecycleStatus.CURRENT,
         verification_status=IdentityDocument.VerificationStatus.PENDING,
     ).exists():
         new_status = PatientProfile.IdentityStatus.PENDING_VERIFICATION
-    elif cards.filter(
+    elif documents.filter(
         verification_status=IdentityDocument.VerificationStatus.REJECTED
     ).exists():
         new_status = PatientProfile.IdentityStatus.REJECTED
@@ -201,7 +212,7 @@ def approve_identity_document(*, document, agent):
     with transaction.atomic():
         document = (
             IdentityDocument.objects.select_for_update()
-            .select_related("patient", "replaces")
+            .select_related("patient")
             .get(pk=document.pk)
         )
         profile = PatientProfile.objects.select_for_update().get(pk=document.patient_id)

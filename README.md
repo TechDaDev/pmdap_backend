@@ -5,14 +5,16 @@ Django REST Framework, PostgreSQL, Redis, Celery, and versioned REST APIs.
 
 ## Delivery status
 
-M0-M2 accepted. M3 identity-document verification is implemented locally and
-awaits project-owner acceptance. M4 and later phases remain blocked.
+M0-M3 are accepted. M4 minor identities and guardian relationships are
+implemented locally and await project-owner acceptance. M5 and later phases
+remain blocked.
 
 ## Authoritative documents
 
 - [Phase 1 scope](docs/specification/phase-1-scope.md)
 - [M0 foundation design](docs/superpowers/specs/2026-08-08-m0-project-foundation-design.md)
 - [M3 identity-document design](docs/superpowers/specs/2026-08-08-m3-identity-documents-design.md)
+- [M4 minor/guardian design](docs/superpowers/specs/2026-08-08-m4-minors-guardians-design.md)
 - [Architecture decisions](docs/architecture/README.md)
 - [Contributor and agent rules](AGENTS.md)
 
@@ -41,6 +43,15 @@ Quality and framework checks:
 .venv/bin/python manage.py check --settings=config.settings.test
 .venv/bin/python manage.py makemigrations --check --dry-run \
   --settings=config.settings.test
+```
+
+M4's marked concurrency suite must run against PostgreSQL, not SQLite:
+
+```bash
+DJANGO_SETTINGS_MODULE=config.settings.postgres_test \
+POSTGRES_DB=pmdap POSTGRES_USER=pmdap POSTGRES_PASSWORD=... \
+POSTGRES_HOST=127.0.0.1 POSTGRES_PORT=5432 \
+.venv/bin/pytest tests/test_postgresql_concurrency.py -m postgresql
 ```
 
 ## Docker Compose
