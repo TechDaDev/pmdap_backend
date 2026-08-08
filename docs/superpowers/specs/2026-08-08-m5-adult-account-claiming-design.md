@@ -116,4 +116,3 @@ Tests cover public privacy equivalence, upload cleanup, mass assignment, state
 transitions, transaction rollback, identity continuity, guardian normalization,
 activation security, M1 integration, age-18 journey, OpenAPI, and four actual
 PostgreSQL races. Full M0-M4 suite stays green; branch coverage remains >=90%.
-

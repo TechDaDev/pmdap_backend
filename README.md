@@ -5,9 +5,8 @@ Django REST Framework, PostgreSQL, Redis, Celery, and versioned REST APIs.
 
 ## Delivery status
 
-M0-M3 are accepted. M4 minor identities and guardian relationships are
-implemented locally and await project-owner acceptance. M5 and later phases
-remain blocked.
+M0-M4 are accepted. M5 adult patient account claiming is implemented locally
+and awaits project-owner acceptance. M6 and later phases remain blocked.
 
 ## Authoritative documents
 
@@ -15,6 +14,7 @@ remain blocked.
 - [M0 foundation design](docs/superpowers/specs/2026-08-08-m0-project-foundation-design.md)
 - [M3 identity-document design](docs/superpowers/specs/2026-08-08-m3-identity-documents-design.md)
 - [M4 minor/guardian design](docs/superpowers/specs/2026-08-08-m4-minors-guardians-design.md)
+- [M5 adult account-claiming design](docs/superpowers/specs/2026-08-08-m5-adult-account-claiming-design.md)
 - [Architecture decisions](docs/architecture/README.md)
 - [Contributor and agent rules](AGENTS.md)
 
@@ -45,14 +45,32 @@ Quality and framework checks:
   --settings=config.settings.test
 ```
 
-M4's marked concurrency suite must run against PostgreSQL, not SQLite:
+M4/M5 marked concurrency suites must run against PostgreSQL, not SQLite:
 
 ```bash
 DJANGO_SETTINGS_MODULE=config.settings.postgres_test \
 POSTGRES_DB=pmdap POSTGRES_USER=pmdap POSTGRES_PASSWORD=... \
 POSTGRES_HOST=127.0.0.1 POSTGRES_PORT=5432 \
-.venv/bin/pytest tests/test_postgresql_concurrency.py -m postgresql
+.venv/bin/pytest tests/test_postgresql_concurrency.py \
+  tests/test_account_claim_concurrency.py -m postgresql
 ```
+
+## M5 account claiming
+
+Public submission and activation expose only bounded receipt/credential
+contracts:
+
+- `POST /api/v1/account-claims/`
+- `POST /api/v1/auth/activate-claimed-account/`
+
+Exact-role identity verification agents use the protected queue, detail,
+evidence, approve, reject, and request-more-information endpoints under
+`/api/v1/verification/account-claims/`. Public claim status polling and anonymous
+claim editing are intentionally omitted. Approval links a new
+`PENDING_ACTIVATION` PATIENT account to the same lifelong PatientProfile;
+activation tokens are random, short-lived, single-use, and stored only as
+SHA-256 hashes. Claim evidence remains private evidence and never silently
+replaces verified M3 identity truth.
 
 ## Docker Compose
 

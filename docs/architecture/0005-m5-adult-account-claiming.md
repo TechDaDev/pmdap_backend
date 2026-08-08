@@ -103,4 +103,3 @@ ACTIVE, and records use. Existing M1 authentication rejects non-ACTIVE status.
 - Messaging provider integration replaces agent-mediated token delivery.
 - Secure claim sessions enable public status and evidence updates.
 - Product requires pre-approval promotion of newer National Cards.
-
