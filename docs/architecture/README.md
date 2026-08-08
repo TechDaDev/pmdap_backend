@@ -11,3 +11,4 @@ of rewriting their history.
 | [0004](0004-m4-minor-guardian-authority.md) | M4 minor identity and guardian authority | Accepted | 2026-08-08 |
 | [0005](0005-m5-adult-account-claiming.md) | M5 adult patient account claiming | Accepted | 2026-08-08 |
 | [0006](0006-m6-medical-file-storage.md) | M6 private medical document storage | Accepted | 2026-08-09 |
+| [0007](0007-m7-pdf-text-extraction.md) | M7 PDF text extraction | Accepted | 2026-08-09 |
