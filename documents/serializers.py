@@ -109,3 +109,13 @@ class MedicalDocumentSerializer(serializers.ModelSerializer):
             "updated_at",
         )
         read_only_fields = fields
+
+
+class MedicalDocumentDetailSerializer(MedicalDocumentSerializer):
+    text_available = serializers.SerializerMethodField()
+
+    class Meta(MedicalDocumentSerializer.Meta):
+        fields = (*MedicalDocumentSerializer.Meta.fields, "text_available")
+
+    def get_text_available(self, document) -> bool:
+        return hasattr(document, "document_text")

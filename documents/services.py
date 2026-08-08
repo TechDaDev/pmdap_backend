@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import uuid
 
 from django.core.files.base import ContentFile
@@ -24,6 +25,8 @@ EDITABLE_METADATA_FIELDS = (
     "department",
     "physician_name",
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _record_event(document, event_type, actor, metadata=None):
@@ -94,11 +97,17 @@ def create_medical_document(*, patient, actor, upload, metadata, scanner=None):
                 raise OSError("Stored medical file failed integrity verification.")
             stored.integrity_status = StoredFile.IntegrityStatus.VALID
             stored.save(update_fields=("integrity_status", "updated_at"))
+            is_pdf = validated.mime_type == "application/pdf"
             document = MedicalDocument.objects.create(
                 patient=patient,
                 uploaded_by=actor,
                 stored_file=stored,
                 content_sha256=validated.sha256,
+                processing_status=(
+                    MedicalDocument.ProcessingStatus.QUEUED
+                    if is_pdf
+                    else MedicalDocument.ProcessingStatus.UPLOADED
+                ),
                 **values,
             )
             _record_event(
@@ -107,6 +116,17 @@ def create_medical_document(*, patient, actor, upload, metadata, scanner=None):
                 actor,
                 {"malware_scan_status": scan_result.status},
             )
+            if is_pdf:
+                _record_event(
+                    document,
+                    MedicalDocumentEvent.EventType.PDF_EXTRACTION_QUEUED,
+                    actor,
+                )
+                transaction.on_commit(
+                    lambda document_uuid=str(document.uuid): _enqueue_pdf_extraction(
+                        document_uuid
+                    )
+                )
         return document
     except IntegrityError as exc:
         if persisted_name:
@@ -126,6 +146,18 @@ def create_medical_document(*, patient, actor, upload, metadata, scanner=None):
     except Exception:
         stored.file.storage.delete(persisted_name or storage_name)
         raise
+
+
+def _enqueue_pdf_extraction(document_uuid):
+    from processing.tasks import extract_pdf_text
+
+    try:
+        extract_pdf_text.delay(document_uuid)
+    except Exception:
+        logger.error(
+            "PDF extraction enqueue failed",
+            extra={"document_uuid": document_uuid},
+        )
 
 
 def verify_stored_file_integrity(stored_file, *, actor=None):

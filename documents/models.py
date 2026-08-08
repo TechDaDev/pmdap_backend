@@ -91,6 +91,7 @@ class MedicalDocument(UUIDModel):
         QUEUED = "QUEUED", "Queued"
         PROCESSING = "PROCESSING", "Processing"
         TEXT_EXTRACTED = "TEXT_EXTRACTED", "Text extracted"
+        OCR_REQUIRED = "OCR_REQUIRED", "OCR required"
         DATE_DETECTED = "DATE_DETECTED", "Date detected"
         AWAITING_CONFIRMATION = "AWAITING_CONFIRMATION", "Awaiting confirmation"
         INDEXED = "INDEXED", "Indexed"
@@ -137,6 +138,8 @@ class MedicalDocument(UUIDModel):
         choices=ProcessingStatus,
         default=ProcessingStatus.UPLOADED,
     )
+    processing_failure_code = models.CharField(max_length=64, blank=True, default="")
+    processing_started_at = models.DateTimeField(null=True, blank=True)
     archive_status = models.CharField(
         max_length=16,
         choices=ArchiveStatus,
@@ -181,6 +184,14 @@ class MedicalDocumentEvent(UUIDModel):
             "MEDICAL_FILE_INTEGRITY_CHECKED",
             "File integrity checked",
         )
+        PDF_EXTRACTION_QUEUED = "PDF_EXTRACTION_QUEUED", "PDF extraction queued"
+        PDF_EXTRACTION_STARTED = (
+            "PDF_EXTRACTION_STARTED",
+            "PDF extraction started",
+        )
+        PDF_TEXT_EXTRACTED = "PDF_TEXT_EXTRACTED", "PDF text extracted"
+        PDF_OCR_REQUIRED = "PDF_OCR_REQUIRED", "PDF OCR required"
+        PDF_EXTRACTION_FAILED = "PDF_EXTRACTION_FAILED", "PDF extraction failed"
 
     document = models.ForeignKey(
         MedicalDocument,

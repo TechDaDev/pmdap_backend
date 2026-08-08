@@ -14,6 +14,7 @@ from documents.exceptions import (
 )
 from documents.models import MedicalDocument, StoredFile
 from documents.serializers import (
+    MedicalDocumentDetailSerializer,
     MedicalDocumentMetadataSerializer,
     MedicalDocumentSerializer,
     MedicalDocumentUploadSerializer,
@@ -46,7 +47,9 @@ def paginated_envelope(name, child):
 
 def active_document(patient, document_uuid):
     try:
-        return MedicalDocument.objects.select_related("stored_file").get(
+        return MedicalDocument.objects.select_related(
+            "stored_file", "document_text"
+        ).get(
             uuid=document_uuid,
             patient=patient,
             archive_status=MedicalDocument.ArchiveStatus.ACTIVE,
@@ -176,7 +179,7 @@ class MedicalDocumentDetailView(APIView):
         responses={
             200: envelope(
                 "MedicalDocumentDetailSuccess",
-                MedicalDocumentSerializer(read_only=True),
+                MedicalDocumentDetailSerializer(read_only=True),
             ),
             401: ErrorEnvelopeSerializer,
             403: ErrorEnvelopeSerializer,
@@ -187,7 +190,7 @@ class MedicalDocumentDetailView(APIView):
     def get(self, request, document_uuid, **kwargs):
         return Response(
             {
-                "data": MedicalDocumentSerializer(
+                "data": MedicalDocumentDetailSerializer(
                     self.get_document(request, document_uuid, **kwargs)
                 ).data
             }
