@@ -7,6 +7,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.serializers import ErrorEnvelopeSerializer
+from documents.date_services import confirm_document_date
 from documents.exceptions import (
     MedicalDocumentNotFound,
     MedicalFileStorageFailed,
@@ -15,6 +16,8 @@ from documents.exceptions import (
 from documents.models import MedicalDocument, StoredFile
 from documents.serializers import (
     DateCandidateSerializer,
+    DocumentDateConfirmationResponseSerializer,
+    DocumentDateConfirmationSerializer,
     MedicalDocumentDetailSerializer,
     MedicalDocumentMetadataSerializer,
     MedicalDocumentSerializer,
@@ -294,8 +297,49 @@ class MedicalDocumentDateCandidateView(APIView):
         )
         return page_response(
             request,
-            document.date_candidates.all(),
+            document.date_candidates.filter(is_current=True),
             DateCandidateSerializer,
+        )
+
+
+class MedicalDocumentDateConfirmationView(APIView):
+    parser_classes = (JSONParser,)
+
+    def get_patient(self, request, **kwargs):
+        del kwargs
+        return owned_profile(request.user)
+
+    @extend_schema(
+        operation_id="medical_document_date_confirm",
+        request=DocumentDateConfirmationSerializer,
+        responses={
+            200: envelope(
+                "MedicalDocumentDateConfirmed",
+                DocumentDateConfirmationResponseSerializer(read_only=True),
+            ),
+            400: ErrorEnvelopeSerializer,
+            401: ErrorEnvelopeSerializer,
+            403: ErrorEnvelopeSerializer,
+            404: ErrorEnvelopeSerializer,
+            409: ErrorEnvelopeSerializer,
+        },
+        tags=["Medical documents"],
+    )
+    def post(self, request, document_uuid, **kwargs):
+        document = active_document(
+            self.get_patient(request, **kwargs),
+            document_uuid,
+        )
+        serializer = DocumentDateConfirmationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        document = confirm_document_date(
+            document=document,
+            actor=request.user,
+            candidate_id=serializer.validated_data.get("candidate_id"),
+            manual_date=serializer.validated_data.get("date"),
+        )
+        return Response(
+            {"data": DocumentDateConfirmationResponseSerializer(document).data}
         )
 
 
@@ -340,5 +384,13 @@ class MinorMedicalDocumentFileView(MedicalDocumentFileView):
     get=extend_schema(operation_id="minor_medical_document_date_candidate_list"),
 )
 class MinorMedicalDocumentDateCandidateView(MedicalDocumentDateCandidateView):
+    def get_patient(self, request, **kwargs):
+        return authorized_minor_patient(request, kwargs["minor_uuid"])
+
+
+@extend_schema_view(
+    post=extend_schema(operation_id="minor_medical_document_date_confirm"),
+)
+class MinorMedicalDocumentDateConfirmationView(MedicalDocumentDateConfirmationView):
     def get_patient(self, request, **kwargs):
         return authorized_minor_patient(request, kwargs["minor_uuid"])

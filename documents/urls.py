@@ -3,6 +3,7 @@ from django.urls import path
 from documents.api import (
     MedicalDocumentCollectionView,
     MedicalDocumentDateCandidateView,
+    MedicalDocumentDateConfirmationView,
     MedicalDocumentDetailView,
     MedicalDocumentFileView,
 )
@@ -23,5 +24,10 @@ urlpatterns = [
         "<uuid:document_uuid>/date-candidates/",
         MedicalDocumentDateCandidateView.as_view(),
         name="medical-document-date-candidates",
+    ),
+    path(
+        "<uuid:document_uuid>/confirm-date/",
+        MedicalDocumentDateConfirmationView.as_view(),
+        name="medical-document-confirm-date",
     ),
 ]

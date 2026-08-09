@@ -68,7 +68,7 @@ def test_processing_persists_ranked_candidates_and_preserves_manual_date(
 
     document.refresh_from_db()
     candidates = list(document.date_candidates.all())
-    assert outcome == MedicalDocument.ProcessingStatus.DATE_DETECTED
+    assert outcome == MedicalDocument.ProcessingStatus.DATE_CONFIRMED
     assert len(candidates) == 4
     assert sum(candidate.is_suggested for candidate in candidates) == 1
     suggested = next(candidate for candidate in candidates if candidate.is_suggested)
@@ -100,7 +100,7 @@ def test_no_date_is_stable_non_failure_without_candidates():
     outcome = process_date_candidates(str(document.uuid))
 
     document.refresh_from_db()
-    assert outcome == MedicalDocument.ProcessingStatus.DATE_NOT_FOUND
+    assert outcome == MedicalDocument.ProcessingStatus.AWAITING_CONFIRMATION
     assert document.processing_failure_code == ""
     assert not document.date_candidates.exists()
     assert document.events.filter(
@@ -115,7 +115,7 @@ def test_repeated_delivery_reuses_canonical_candidate_set():
     candidate_uuid = document.date_candidates.get().uuid
     second = process_date_candidates(str(document.uuid))
 
-    assert first == second == MedicalDocument.ProcessingStatus.DATE_DETECTED
+    assert first == second == MedicalDocument.ProcessingStatus.AWAITING_CONFIRMATION
     assert document.date_candidates.count() == 1
     assert document.date_candidates.get().uuid == candidate_uuid
 

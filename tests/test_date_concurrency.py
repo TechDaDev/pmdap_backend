@@ -67,7 +67,7 @@ def test_two_workers_leave_one_canonical_candidate_set_and_suggestion():
 
     document.refresh_from_db()
     assert not failures
-    assert results == [MedicalDocument.ProcessingStatus.DATE_DETECTED]
+    assert results == [MedicalDocument.ProcessingStatus.AWAITING_CONFIRMATION]
     assert second == MedicalDocument.ProcessingStatus.DATE_PROCESSING
     assert document.date_candidates.count() == 2
     assert document.date_candidates.filter(is_suggested=True).count() == 1

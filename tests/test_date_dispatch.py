@@ -111,7 +111,7 @@ def test_native_pdf_to_canonical_text_to_date_candidate(tmp_path):
             )
             == MedicalDocument.ProcessingStatus.TEXT_EXTRACTED
         )
-    assert process_date_candidates(str(document.uuid)) == "DATE_DETECTED"
+    assert process_date_candidates(str(document.uuid)) == "AWAITING_CONFIRMATION"
 
     detected = DateCandidate.objects.get(document=document, is_suggested=True)
     assert str(detected.detected_date) == "2026-03-14"
@@ -127,7 +127,7 @@ def test_image_to_ocr_canonical_text_to_date_candidate(tmp_path):
             process_ocr_document(str(document.uuid), engine=FakeEngine())
             == MedicalDocument.ProcessingStatus.TEXT_EXTRACTED
         )
-    assert process_date_candidates(str(document.uuid)) == "DATE_DETECTED"
+    assert process_date_candidates(str(document.uuid)) == "AWAITING_CONFIRMATION"
 
     detected = DateCandidate.objects.get(document=document, is_suggested=True)
     assert str(detected.detected_date) == "2026-03-14"

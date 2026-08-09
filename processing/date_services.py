@@ -1,5 +1,6 @@
 import logging
 import time
+import uuid
 from dataclasses import dataclass
 from datetime import timedelta
 
@@ -78,7 +79,7 @@ def _configuration_valid():
     )
 
 
-def _claim(document_uuid):
+def _claim(document_uuid, *, reprocess=False):
     with transaction.atomic():
         document = (
             MedicalDocument.objects.select_for_update()
@@ -90,9 +91,11 @@ def _claim(document_uuid):
             or document.archive_status != MedicalDocument.ArchiveStatus.ACTIVE
         ):
             return None, "SKIPPED"
-        if document.processing_status in {
+        if not reprocess and document.processing_status in {
             MedicalDocument.ProcessingStatus.DATE_DETECTED,
             MedicalDocument.ProcessingStatus.DATE_NOT_FOUND,
+            MedicalDocument.ProcessingStatus.AWAITING_CONFIRMATION,
+            MedicalDocument.ProcessingStatus.DATE_CONFIRMED,
         }:
             return None, document.processing_status
         if (
@@ -110,6 +113,17 @@ def _claim(document_uuid):
         elif (
             document.processing_status
             != MedicalDocument.ProcessingStatus.TEXT_EXTRACTED
+            and not (
+                reprocess
+                and document.processing_status
+                in {
+                    MedicalDocument.ProcessingStatus.DATE_DETECTED,
+                    MedicalDocument.ProcessingStatus.DATE_NOT_FOUND,
+                    MedicalDocument.ProcessingStatus.AWAITING_CONFIRMATION,
+                    MedicalDocument.ProcessingStatus.DATE_CONFIRMED,
+                    MedicalDocument.ProcessingStatus.FAILED,
+                }
+            )
         ):
             return None, document.processing_status
         if not hasattr(document, "document_text"):
@@ -240,7 +254,10 @@ def _persist(claim, candidates):
             minimum_score=settings.DATE_SUGGESTION_MIN_SCORE,
             tie_tolerance=settings.DATE_SUGGESTION_TIE_TOLERANCE,
         )
-        DateCandidate.objects.filter(document=document).delete()
+        candidate_set_uuid = uuid.uuid4()
+        DateCandidate.objects.filter(document=document, is_current=True).update(
+            is_current=False
+        )
         DateCandidate.objects.bulk_create(
             [
                 DateCandidate(
@@ -259,14 +276,16 @@ def _persist(claim, candidates):
                     parsing_rule=candidate.parsing_rule,
                     pipeline_version=settings.DATE_PIPELINE_VERSION,
                     is_suggested=index == suggested_index,
+                    candidate_set_uuid=candidate_set_uuid,
+                    is_current=True,
                 )
                 for index, candidate in enumerate(candidates)
             ]
         )
         document.processing_status = (
-            MedicalDocument.ProcessingStatus.DATE_DETECTED
-            if candidates
-            else MedicalDocument.ProcessingStatus.DATE_NOT_FOUND
+            MedicalDocument.ProcessingStatus.DATE_CONFIRMED
+            if document.date_verified
+            else MedicalDocument.ProcessingStatus.AWAITING_CONFIRMATION
         )
         document.processing_failure_code = ""
         document.processing_started_at = None
@@ -289,15 +308,18 @@ def _persist(claim, candidates):
                 "candidate_count": len(candidates),
                 "suggestion_present": suggested_index is not None,
                 "pipeline_version": settings.DATE_PIPELINE_VERSION,
+                "candidate_set_uuid": str(candidate_set_uuid),
             },
         )
         return document.processing_status
 
 
-def process_date_candidates(document_uuid, *, detector=detect_page_dates):
+def process_date_candidates(
+    document_uuid, *, detector=detect_page_dates, reprocess=False
+):
     started = time.monotonic()
     try:
-        claim, outcome = _claim(document_uuid)
+        claim, outcome = _claim(document_uuid, reprocess=reprocess)
     except DatabaseError as exc:
         raise RetryableDateProcessingError("date_database_retryable") from exc
     if claim is None:
@@ -336,7 +358,9 @@ def process_date_candidates(document_uuid, *, detector=detect_page_dates):
             "candidate_count": len(candidates),
             "suggestion_present": any(
                 candidate.is_suggested
-                for candidate in DateCandidate.objects.filter(document_id=document_uuid)
+                for candidate in DateCandidate.objects.filter(
+                    document_id=document_uuid, is_current=True
+                )
             ),
             "duration_ms": int((time.monotonic() - started) * 1000),
             "pipeline_version": settings.DATE_PIPELINE_VERSION,

@@ -48,6 +48,7 @@ def test_owner_gets_only_allowlisted_paginated_candidate_fields(api_client):
     assert response.data["data"]["count"] == 1
     item = response.data["data"]["results"][0]
     assert set(item) == {
+        "uuid",
         "date",
         "alternative_date",
         "type",

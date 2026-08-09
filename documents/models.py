@@ -97,6 +97,7 @@ class MedicalDocument(UUIDModel):
         DATE_DETECTED = "DATE_DETECTED", "Date detected"
         DATE_NOT_FOUND = "DATE_NOT_FOUND", "Date not found"
         AWAITING_CONFIRMATION = "AWAITING_CONFIRMATION", "Awaiting confirmation"
+        DATE_CONFIRMED = "DATE_CONFIRMED", "Date confirmed"
         INDEXED = "INDEXED", "Indexed"
         FAILED = "FAILED", "Failed"
 
@@ -243,3 +244,44 @@ class MedicalDocumentEvent(UUIDModel):
 
     def delete(self, *args, **kwargs):
         raise ValidationError("Medical document events are immutable.")
+
+
+class DocumentDateEvent(UUIDModel):
+    class Action(models.TextChoices):
+        DATE_CONFIRMED = "DATE_CONFIRMED", "Date confirmed"
+        DATE_CORRECTED = "DATE_CORRECTED", "Date corrected"
+        DATE_RECONFIRMED = "DATE_RECONFIRMED", "Date reconfirmed"
+
+    document = models.ForeignKey(
+        MedicalDocument,
+        on_delete=models.PROTECT,
+        related_name="date_events",
+    )
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="medical_document_date_events",
+    )
+    action = models.CharField(max_length=24, choices=Action)
+    previous_date = models.DateField(null=True, blank=True)
+    new_date = models.DateField()
+    source = models.CharField(max_length=24, choices=MedicalDocument.DateSource)
+    candidate = models.ForeignKey(
+        "processing.DateCandidate",
+        on_delete=models.PROTECT,
+        related_name="selection_events",
+        null=True,
+        blank=True,
+    )
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ("created_at", "uuid")
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValidationError("Document date events are immutable.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Document date events are immutable.")

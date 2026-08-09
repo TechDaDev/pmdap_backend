@@ -130,6 +130,7 @@ class DateCandidateSerializer(serializers.ModelSerializer):
     class Meta:
         model = DateCandidate
         fields = (
+            "uuid",
             "date",
             "alternative_date",
             "type",
@@ -139,5 +140,38 @@ class DateCandidateSerializer(serializers.ModelSerializer):
             "source",
             "ambiguous",
             "is_suggested",
+        )
+        read_only_fields = fields
+
+
+class DocumentDateConfirmationSerializer(
+    RejectUnknownFieldsMixin,
+    serializers.Serializer,
+):
+    candidate_id = serializers.UUIDField(required=False)
+    date = serializers.DateField(required=False)
+
+    def validate(self, attrs):
+        if ("candidate_id" in attrs) == ("date" in attrs):
+            from documents.exceptions import InvalidDateConfirmation
+
+            raise InvalidDateConfirmation()
+        if "date" in attrs and attrs["date"] > timezone.localdate():
+            from documents.exceptions import InvalidDocumentDate
+
+            raise InvalidDocumentDate()
+        return attrs
+
+
+class DocumentDateConfirmationResponseSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MedicalDocument
+        fields = (
+            "uuid",
+            "document_date",
+            "date_source",
+            "date_verified",
+            "date_verified_at",
+            "processing_status",
         )
         read_only_fields = fields

@@ -1,3 +1,5 @@
+import uuid
+
 from django.db import models
 
 from common.models import UUIDModel
@@ -116,12 +118,14 @@ class DateCandidate(UUIDModel):
     parsing_rule = models.CharField(max_length=32)
     pipeline_version = models.CharField(max_length=32)
     is_suggested = models.BooleanField(default=False)
+    candidate_set_uuid = models.UUIDField(default=uuid.uuid4, editable=False)
+    is_current = models.BooleanField(default=True)
 
     class Meta:
         ordering = ("-score", "page_number", "occurrence_index", "uuid")
         indexes = [
             models.Index(
-                fields=("document", "pipeline_version"),
+                fields=("document", "is_current", "pipeline_version"),
                 name="date_candidate_pipeline_idx",
             ),
         ]
@@ -129,6 +133,7 @@ class DateCandidate(UUIDModel):
             models.UniqueConstraint(
                 fields=(
                     "document",
+                    "candidate_set_uuid",
                     "pipeline_version",
                     "page_number",
                     "occurrence_index",
@@ -138,7 +143,7 @@ class DateCandidate(UUIDModel):
             ),
             models.UniqueConstraint(
                 fields=("document",),
-                condition=models.Q(is_suggested=True),
+                condition=models.Q(is_current=True, is_suggested=True),
                 name="date_candidate_one_suggested",
             ),
             models.CheckConstraint(
