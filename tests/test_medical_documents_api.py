@@ -171,7 +171,7 @@ def test_authorized_file_stream_is_original_and_header_safe(api_client, tmp_path
     assert str(tmp_path) not in disposition
 
 
-def test_metadata_patch_sets_correction_provenance_and_rejects_protected_fields(
+def test_metadata_patch_rejects_date_authority_and_protected_fields(
     api_client,
     tmp_path,
 ):
@@ -183,7 +183,12 @@ def test_metadata_patch_sets_correction_provenance_and_rejects_protected_fields(
         url = f"{COLLECTION}{created['uuid']}/"
         response = api_client.patch(
             url,
-            {"title": "Corrected", "document_date": "2026-07-31"},
+            {"title": "Corrected"},
+            format="json",
+        )
+        rejected_date = api_client.patch(
+            url,
+            {"document_date": "2026-07-31"},
             format="json",
         )
         rejected = api_client.patch(
@@ -193,8 +198,9 @@ def test_metadata_patch_sets_correction_provenance_and_rejects_protected_fields(
         )
 
     assert response.status_code == 200
-    assert response.data["data"]["date_source"] == "USER_CORRECTED"
-    assert response.data["data"]["date_verified"] is True
+    assert response.data["data"]["date_source"] == ""
+    assert response.data["data"]["date_verified"] is False
+    assert_error(rejected_date, 400, "validation_error")
     assert_error(rejected, 400, "validation_error")
 
 

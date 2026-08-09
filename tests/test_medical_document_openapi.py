@@ -58,6 +58,7 @@ def test_openapi_upload_is_multipart_and_matches_writable_contract(api_client):
             "title",
             "description",
             "document_date",
+            "healthcare_facility_id",
             "facility_name",
             "location_text",
             "department",
@@ -89,6 +90,7 @@ def test_openapi_response_and_patch_do_not_expose_internal_storage_fields(api_cl
     }
 
     patch = schema["paths"]["/api/v1/documents/{document_uuid}/"]["patch"]
+    assert "409" in patch["responses"]
     patch_content = patch["requestBody"]["content"]["application/json"]["schema"]
     patch_schema = resolve_schema(schema, patch_content)
     assert forbidden.isdisjoint(patch_schema["properties"])
@@ -96,7 +98,7 @@ def test_openapi_response_and_patch_do_not_expose_internal_storage_fields(api_cl
         "document_type",
         "title",
         "description",
-        "document_date",
+        "healthcare_facility_id",
         "facility_name",
         "location_text",
         "department",

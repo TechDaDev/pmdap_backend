@@ -215,7 +215,9 @@ def test_event_failure_rolls_back_document_file_row_and_blob(tmp_path):
     assert not [path for path in tmp_path.rglob("*") if path.is_file()]
 
 
-def test_clearing_manual_date_resets_provenance_and_empty_patch_is_noop(tmp_path):
+def test_generic_service_does_not_reopen_date_authority_and_empty_patch_is_noop(
+    tmp_path,
+):
     actor, patient = actor_and_patient()
     with override_settings(MEDICAL_FILE_ROOT=tmp_path):
         document = create(
@@ -235,10 +237,10 @@ def test_clearing_manual_date_resets_provenance_and_empty_patch_is_noop(tmp_path
             metadata={},
         )
 
-    assert document.document_date is None
-    assert document.date_source == ""
-    assert document.date_verified is False
-    assert document.date_verified_at is None
+    assert document.document_date == date(2026, 8, 1)
+    assert document.date_source == MedicalDocument.DateSource.USER_ENTERED
+    assert document.date_verified is True
+    assert document.date_verified_at is not None
     assert document.events.count() == event_count
 
 
