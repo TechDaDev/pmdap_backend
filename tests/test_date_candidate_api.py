@@ -32,7 +32,7 @@ def candidate(document, *, context="Report Date: 14/03/2026"):
         source=DateCandidate.Source.PDF_TEXT,
         occurrence_index=13,
         parsing_rule="DMY_NUMERIC",
-        pipeline_version="m9-date-v1",
+        pipeline_version="m9-date-v2",
         is_suggested=True,
     )
 

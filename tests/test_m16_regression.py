@@ -69,14 +69,16 @@ def test_print_date_loses_to_report_date():
     assert candidate.detected_date == date(2026, 3, 14)
 
 
-def test_arabic_separate_line_date_classified_unknown():
-    # Captured benchmark behavior: OCR preserved digits on their own line but
-    # M9 only associates same-line labels, so it is UNKNOWN and not suggested.
+def test_arabic_separate_line_date_suggested_via_cross_line():
+    # M16.1 remediation: a date on its own line below the Arabic label is now
+    # associated via the adjacent line and suggested as REPORT_DATE.
     text = "تقرير المختبر الطبي\nتاريخ التقرير\n14/03/2026\nالهيموغلوبين: 13.4"
     candidates = detect(text)
     assert any(c.detected_date == date(2026, 3, 14) for c in candidates)
     candidate = suggested(text)
-    assert candidate is None  # UNKNOWN score < min threshold
+    assert candidate is not None
+    assert candidate.detected_date == date(2026, 3, 14)
+    assert candidate.candidate_type == CandidateType.REPORT_DATE
 
 
 def test_inline_arabic_western_date_digits_absent():
@@ -87,13 +89,16 @@ def test_inline_arabic_western_date_digits_absent():
     assert not any(c.detected_date == date(2026, 3, 14) for c in candidates)
 
 
-def test_footer_issued_label_unknown():
-    # "Issued <date>" without the "issued date" phrase is not a recognized
-    # label; the date is classified UNKNOWN and not suggested.
+def test_footer_issued_label_classified_issue_date():
+    # M16.1 remediation: bare "Issued <date>" is now an explicit ISSUE_DATE
+    # label and is suggested (previously UNKNOWN / no suggestion).
     text = "PATHOLOGY DEPARTMENT\nResult: Normal\nIssued 14/03/2026\nPage 1 of 1"
     candidates = detect(text)
     assert any(c.detected_date == date(2026, 3, 14) for c in candidates)
-    assert suggested(text) is None
+    candidate = suggested(text)
+    assert candidate is not None
+    assert candidate.detected_date == date(2026, 3, 14)
+    assert candidate.candidate_type == CandidateType.ISSUE_DATE
 
 
 def test_bare_ambiguous_date_withheld():

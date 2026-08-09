@@ -167,7 +167,7 @@ def test_candidate_must_belong_to_document_and_be_current(api_client):
         source=DateCandidate.Source.PDF_TEXT,
         occurrence_index=1,
         parsing_rule="DMY_NUMERIC",
-        pipeline_version="m9-date-v1",
+        pipeline_version="m9-date-v2",
     )
     stale = document.date_candidates.filter(is_current=True).first()
     DateCandidate.objects.filter(pk=stale.pk).update(is_current=False)

@@ -91,7 +91,7 @@ def test_arabic_ocr_page_preserves_raw_value_and_source():
     assert candidate.raw_value == "١٤/٠٣/٢٠٢٦"
     assert candidate.normalized_value == "14/03/2026"
     assert candidate.source == DateCandidate.Source.OCR
-    assert candidate.pipeline_version == "m9-date-v1"
+    assert candidate.pipeline_version == "m9-date-v2"
 
 
 def test_no_date_is_stable_non_failure_without_candidates():
@@ -218,7 +218,7 @@ def test_database_constraints_bound_score_occurrence_and_suggestion():
             source=DateCandidate.Source.PDF_TEXT,
             occurrence_index=50,
             parsing_rule="DMY_NUMERIC",
-            pipeline_version="m9-date-v1",
+            pipeline_version="m9-date-v2",
             is_suggested=True,
         )
     with pytest.raises(IntegrityError), transaction.atomic():

@@ -91,6 +91,7 @@ class DateCandidate(UUIDModel):
         EXAMINATION_DATE = "EXAMINATION_DATE", "Examination date"
         ADMISSION_DATE = "ADMISSION_DATE", "Admission date"
         DISCHARGE_DATE = "DISCHARGE_DATE", "Discharge date"
+        APPLICATION_DATE = "APPLICATION_DATE", "Application date"
         PRINT_DATE = "PRINT_DATE", "Print date"
         DATE_OF_BIRTH = "DATE_OF_BIRTH", "Date of birth"
         UNKNOWN = "UNKNOWN", "Unknown"

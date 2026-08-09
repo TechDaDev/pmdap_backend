@@ -2,20 +2,17 @@
   "summary": {
     "documents_with_expected_date": 33,
     "documents_processed": 34,
-    "date_detection_recall": 0.6666666666666666,
-    "suggestion_accuracy": 0.5757575757575758,
+    "date_detection_recall": 0.696969696969697,
+    "suggestion_accuracy": 0.6666666666666666,
     "suggestion_precision": 1.0,
     "wrong_suggestion_rate": 0.0,
-    "no_suggestion_rate": 0.42424242424242425,
+    "no_suggestion_rate": 0.3333333333333333,
     "dob_false_selection_rate": 0.0,
-    "candidate_type_accuracy": 0.8636363636363636,
+    "candidate_type_accuracy": 0.9130434782608695,
     "wrong_suggestion_count": 0,
     "failed_documents": [],
     "no_suggestion_documents": [
-      "m16-en-footer",
       "m16-ar-simple",
-      "m16-ar-separate-line",
-      "m16-ar-separate-indic",
       "m16-ar-indic",
       "m16-ar-persian",
       "m16-ar-result",
@@ -53,7 +50,7 @@
       "no_suggestion": false,
       "ocr_pages": 1,
       "native_pages": 0,
-      "duration_ms": 1282,
+      "duration_ms": 1285,
       "notes": "",
       "ocr_text_excerpt": "MEDICAL LABORATORY REPORT\nPatient: A. Sample\nReport Date: 14/03/2026\nHemoglobin: 13.4 g/dL"
     },
@@ -84,7 +81,7 @@
       "no_suggestion": false,
       "ocr_pages": 1,
       "native_pages": 0,
-      "duration_ms": 1242,
+      "duration_ms": 1374,
       "notes": "",
       "ocr_text_excerpt": "HOSPITAL PATIENT REPORT\nDate of Birth: 21/06/1985\nCollection Date: 12/07/2026\nReport Date: 14/07/2026\nPrint Date: 15/07/"
     },
@@ -100,19 +97,19 @@
       "detected_in_candidates": true,
       "candidate_count": 1,
       "candidate_types": [
-        "UNKNOWN"
+        "ISSUE_DATE"
       ],
-      "suggested_date": null,
-      "suggested_type": null,
-      "suggested_score": null,
-      "correct_suggested": false,
+      "suggested_date": "2026-03-14",
+      "suggested_type": "ISSUE_DATE",
+      "suggested_score": 0.92,
+      "correct_suggested": true,
       "wrong_suggested": false,
       "dob_selected": false,
       "expected_type_ok": false,
-      "no_suggestion": true,
+      "no_suggestion": false,
       "ocr_pages": 1,
       "native_pages": 0,
-      "duration_ms": 1229,
+      "duration_ms": 1155,
       "notes": "",
       "ocr_text_excerpt": "PATHOLOGY DEPARTMENT\nSpecimen: CBC EDTA\nResult: Normal range\nIssued 14/03/2026\nPage 1 of 1"
     },
@@ -140,7 +137,7 @@
       "no_suggestion": false,
       "ocr_pages": 1,
       "native_pages": 0,
-      "duration_ms": 965,
+      "duration_ms": 936,
       "notes": "",
       "ocr_text_excerpt": "LABORATORY RESULT\nReport Date: 14/03/2026\nTest | Result | Unit\nWBC | 7.4 | K/uL"
     },
@@ -168,7 +165,7 @@
       "no_suggestion": false,
       "ocr_pages": 1,
       "native_pages": 0,
-      "duration_ms": 1486,
+      "duration_ms": 1421,
       "notes": "",
       "ocr_text_excerpt": "BIOCHEMISTRY PANEL\nReport Date: 02/04/2026\nAnalyte Value Ref\nGlucose 5.2 3.9-6.1\nALT\n22\n7-56"
     },
@@ -194,7 +191,7 @@
       "no_suggestion": true,
       "ocr_pages": 1,
       "native_pages": 0,
-      "duration_ms": 9067,
+      "duration_ms": 8602,
       "notes": "",
       "ocr_text_excerpt": "\u0627\u0644\u062a\u062d\u0627\u0644\u064a\u0644 \u0627\u0644\u0637\u0628\u064a\u0629\n\u0645\u062e\u062a\u0628\u0631\n\u0627\u0644\u0645\u0631\u064a\u0636 \u0639\u064a\u0646\u0629\n\u0627\u0633\u0645\n\u0627\u0644\u062a\u0642\u0631\u064a\u0631\n\u062a\u0627\u0631\u064a\u062e\n\u0627\u0644\u0647\u064a\u0645\u0648\u063a\u0644\u0648\u0628\u064a\u0646"
     },
@@ -210,19 +207,19 @@
       "detected_in_candidates": true,
       "candidate_count": 1,
       "candidate_types": [
-        "UNKNOWN"
+        "REPORT_DATE"
       ],
-      "suggested_date": null,
-      "suggested_type": null,
-      "suggested_score": null,
-      "correct_suggested": false,
+      "suggested_date": "2026-03-14",
+      "suggested_type": "REPORT_DATE",
+      "suggested_score": 0.93,
+      "correct_suggested": true,
       "wrong_suggested": false,
       "dob_selected": false,
-      "expected_type_ok": false,
-      "no_suggestion": true,
+      "expected_type_ok": true,
+      "no_suggestion": false,
       "ocr_pages": 1,
       "native_pages": 0,
-      "duration_ms": 8629,
+      "duration_ms": 8907,
       "notes": "Date on its own line below the Arabic label.",
       "ocr_text_excerpt": "\u062a\u0642\u0631\u064a\u0631 \u0627\u0644\u0645\u062e\u062a\u0628\u0631 \u0627\u0644\u0637\u0628\u064a\n\u062a\u0627\u0631\u064a\u062e \u0627\u0644\u062a\u0642\u0631\u064a\u0631\n14/03/2026\n\u0627\u0644\u0647\u064a\u0645\u0648\u063a\u0644\u0648\u0628\u064a\u0646"
     },
@@ -235,20 +232,22 @@
       "digits": "arabic_indic",
       "expected_report_date": "2026-03-14",
       "expected_label": "REPORT_DATE",
-      "detected_in_candidates": false,
-      "candidate_count": 0,
-      "candidate_types": [],
-      "suggested_date": null,
-      "suggested_type": null,
-      "suggested_score": null,
-      "correct_suggested": false,
+      "detected_in_candidates": true,
+      "candidate_count": 1,
+      "candidate_types": [
+        "REPORT_DATE"
+      ],
+      "suggested_date": "2026-03-14",
+      "suggested_type": "REPORT_DATE",
+      "suggested_score": 0.83,
+      "correct_suggested": true,
       "wrong_suggested": false,
       "dob_selected": false,
-      "expected_type_ok": null,
-      "no_suggestion": true,
+      "expected_type_ok": true,
+      "no_suggestion": false,
       "ocr_pages": 1,
       "native_pages": 0,
-      "duration_ms": 8841,
+      "duration_ms": 8352,
       "notes": "Arabic-Indic date on its own line.",
       "ocr_text_excerpt": "\u0645\u0633\u062a\u0634\u0641\u0649 \u0627\u0644\u0645\u062f\u064a\u0646\u0629\n\u062a\u0627\u0631\u064a\u062e \u0627\u0644\u062a\u0642\u0631\u064a\u0631\n\u0661\u0664\u0660\u0663\u0662\u0660\u0662\u0666"
     },
@@ -274,7 +273,7 @@
       "no_suggestion": true,
       "ocr_pages": 1,
       "native_pages": 0,
-      "duration_ms": 8770,
+      "duration_ms": 8443,
       "notes": "Arabic-Indic digits in report and DOB.",
       "ocr_text_excerpt": "\u0645\u0633\u062a\u0634\u0641\u0649 \u0627\u0644\u0645\u062f\u064a\u0646\u0629\n\u0627\u0644\u062a\u0642\u0631\u064a\u0631\n\u062a\u0627\u0631\u064a\u062e\n\u062a\u0627\u0631\u064a\u062e \u0627\u0644\u0645\u064a\u0644\u0627\u062f"
     },
@@ -300,7 +299,7 @@
       "no_suggestion": true,
       "ocr_pages": 1,
       "native_pages": 0,
-      "duration_ms": 8614,
+      "duration_ms": 8392,
       "notes": "Persian digit forms.",
       "ocr_text_excerpt": "\u062a\u0642\u0631\u064a\u0631 \u0627\u0644\u0645\u062e\u062a\u0628\u0631\n\u062a\u0627\u0631\u064a\u062e \u0627\u0644\u062a\u0642\u0631\u064a\u0631"
     },
@@ -328,7 +327,7 @@
       "no_suggestion": true,
       "ocr_pages": 1,
       "native_pages": 0,
-      "duration_ms": 8856,
+      "duration_ms": 8960,
       "notes": "",
       "ocr_text_excerpt": "\u0641\u062d\u0635 \u0627\u0644\u062f\u0645\n\u062a\u0642\u0631\u064a\u0631 \u0641\n\u0627\u0644\u0641\u062d\u0635 13/03/2026\n\u062a\u0627\u0631\u064a\u062e\n\u0627\u0644\u0646\u062a\u064a\u062c\u0629//\n\u062a\u0627\u0631\u064a\u062e\n\u062a\u0627\u0631\u064a\u062e \u0627\u0644\u0637\u0628\u0627\u0639\u0629"
     },
@@ -354,7 +353,7 @@
       "no_suggestion": true,
       "ocr_pages": 1,
       "native_pages": 0,
-      "duration_ms": 9029,
+      "duration_ms": 8479,
       "notes": "",
       "ocr_text_excerpt": "\u0645\u062e\u062a\u0628\u0631 \u0627\u0644\u0623\u0645\u0644\n\u062e\u0627\u0644\u062a\u0642\u0631\u064a\u0631\n\u062a\u0627\u0631\u064a\u062e\n\u0627\u0644\u0645\u062e\u062a\u0628\u0631\n\u062e\u062a\u0645\u0627\n\u062a\u0627\u0631\u064a\u062e \u0627\u0644\u0637\u0628\u0627\u0639\u0629"
     },
@@ -382,7 +381,7 @@
       "no_suggestion": false,
       "ocr_pages": 1,
       "native_pages": 0,
-      "duration_ms": 9266,
+      "duration_ms": 8723,
       "notes": "",
       "ocr_text_excerpt": "MEDICAL REPORT / \u062a\u0642\u0631\u064a\u0631\n\u0637\u0628\u064a\nReport Date: 14/03/2026\n\u0627\u0644\u062a\u0642\u0631\u064a\u0631/0/\n\u062a\u0627\u0631\u064a\u062e\nHemoglobin: 13.4 g/dL"
     },
@@ -410,7 +409,7 @@
       "no_suggestion": false,
       "ocr_pages": 1,
       "native_pages": 0,
-      "duration_ms": 8177,
+      "duration_ms": 8127,
       "notes": "Same date in English and Arabic (western digits).",
       "ocr_text_excerpt": "Report Date: 14/03/2026\n\u062a\u0627\u0631\u064a\u062e \u0627\u0644\u062a\u0642\u0631\u064a"
     },
@@ -466,7 +465,7 @@
       "no_suggestion": false,
       "ocr_pages": 1,
       "native_pages": 2,
-      "duration_ms": 8650,
+      "duration_ms": 8410,
       "notes": "Page1 native text, page2 scanned image, page3 native text.",
       "ocr_text_excerpt": "MEDICAL LABORATORY REPORT\nPatient: A. Sample\n\nReport Date: 14/03/2026\nHemoglobin: 13.4 g/dL\nEnd of report\n"
     },
@@ -492,7 +491,7 @@
       "no_suggestion": true,
       "ocr_pages": 1,
       "native_pages": 0,
-      "duration_ms": 8213,
+      "duration_ms": 8263,
       "notes": "Ambiguous 03/04/2026 under generic label; DOB must not win.",
       "ocr_text_excerpt": "\u062a\u0642\u0631\u064a\u0631 \u0627\u0644\u0645\u062e\u062a\u0628\u0631\n\u0627\u0644\u062a\u0627\u0631\u064a\u062e\n\u062a\u0627\u0631\u064a\u062e \u0627\u0644\u0645\u064a\u0644\u0627\u062f"
     },
@@ -520,7 +519,7 @@
       "no_suggestion": false,
       "ocr_pages": 1,
       "native_pages": 0,
-      "duration_ms": 871,
+      "duration_ms": 830,
       "notes": "",
       "ocr_text_excerpt": "MEDICAL LABORATORY REPORT\nReport Date: 14/03/2026\nHemoglobin: 13.4 g/dL"
     },
@@ -548,7 +547,7 @@
       "no_suggestion": false,
       "ocr_pages": 1,
       "native_pages": 0,
-      "duration_ms": 877,
+      "duration_ms": 1046,
       "notes": "",
       "ocr_text_excerpt": "MEDICAL LABORATORY REPORT\nReport Date: 14/03/2026\nHemoglobin: 13.4 g/dL"
     },
@@ -576,7 +575,7 @@
       "no_suggestion": false,
       "ocr_pages": 1,
       "native_pages": 0,
-      "duration_ms": 8707,
+      "duration_ms": 8747,
       "notes": "",
       "ocr_text_excerpt": "MEDICAL LABORATORY REPORT\nReport Date: 14/03/2026\nHemoglobin: 13.4 g/dL"
     },
@@ -604,7 +603,7 @@
       "no_suggestion": false,
       "ocr_pages": 1,
       "native_pages": 0,
-      "duration_ms": 802,
+      "duration_ms": 1159,
       "notes": "English clean-render with low_contrast degradation.",
       "ocr_text_excerpt": "MEDICAL LABORATORY REPORT\nReport Date: 14/03/2026\nHemoglobin: 13.4 g/dL"
     },
@@ -632,7 +631,7 @@
       "no_suggestion": false,
       "ocr_pages": 1,
       "native_pages": 0,
-      "duration_ms": 1323,
+      "duration_ms": 1224,
       "notes": "English clean-render with blur degradation.",
       "ocr_text_excerpt": "MEDICAL LABORATORY REPORT\nReport Date: 14/03/2026\nHemoglobin: 13.4\ng/dL"
     },
@@ -660,7 +659,7 @@
       "no_suggestion": false,
       "ocr_pages": 1,
       "native_pages": 0,
-      "duration_ms": 924,
+      "duration_ms": 886,
       "notes": "English clean-render with rotation degradation.",
       "ocr_text_excerpt": "MEDICAL LABORATORY REPORT\nReport Date: 14/03/2026\nHemoglobin: 13.4 g/dL"
     },
@@ -688,7 +687,7 @@
       "no_suggestion": false,
       "ocr_pages": 1,
       "native_pages": 0,
-      "duration_ms": 765,
+      "duration_ms": 888,
       "notes": "English clean-render with small_font degradation.",
       "ocr_text_excerpt": "MEDICAL LABORATORY REPORT\nReport Date: 14/03/2026\nHemoglobin: 13.4 g/dL"
     },
@@ -716,7 +715,7 @@
       "no_suggestion": false,
       "ocr_pages": 1,
       "native_pages": 0,
-      "duration_ms": 642,
+      "duration_ms": 679,
       "notes": "English clean-render with noise degradation.",
       "ocr_text_excerpt": "MEDICAL LABORATORY REPORT\nReport Date: 14/03/2026\nHemoglobin: 13.4 g/dL"
     },
@@ -742,7 +741,7 @@
       "no_suggestion": true,
       "ocr_pages": 1,
       "native_pages": 0,
-      "duration_ms": 8991,
+      "duration_ms": 8349,
       "notes": "Arabic clean-render with low_contrast degradation.",
       "ocr_text_excerpt": "\u062a\u0642\u0631\u064a\u0631 \u0627\u0644\u0645\u062e\u062a\u0628\u0631\n\u0627\u0644\u0637\u0628\u064a\n\u2212\n\u0627\u0644\u062a\u0642\u0631\u064a\u0631\n\u062a\u0627\u0631\u064a\u062e"
     },
@@ -768,7 +767,7 @@
       "no_suggestion": true,
       "ocr_pages": 1,
       "native_pages": 0,
-      "duration_ms": 8241,
+      "duration_ms": 8182,
       "notes": "Arabic clean-render with blur degradation.",
       "ocr_text_excerpt": "\u062a\u0642\u0631\u064a\u0631 \u0627\u0644\u0645\u062e\u062a\u0628\u0631 \u0627\u0644\u0637\u0628\u064a\n\u062a\u0627\u0631\u064a\u062e \u0627\u0644\u062a\u0642\u0631\u064a"
     },
@@ -794,7 +793,7 @@
       "no_suggestion": true,
       "ocr_pages": 1,
       "native_pages": 0,
-      "duration_ms": 8269,
+      "duration_ms": 8231,
       "notes": "Arabic clean-render with rotation degradation.",
       "ocr_text_excerpt": "\u062a\u0642\u0631\u064a\u0631 \u0627\u0644\u0645\u062e\u062a\u0628\u0631 \u0627\u0644\u0637\u0628\u064a\n\u062a\u0627\u0631\u064a\u062e \u0627\u0644\u062a\u0642\u0631\u064a"
     },
@@ -820,7 +819,7 @@
       "no_suggestion": true,
       "ocr_pages": 1,
       "native_pages": 0,
-      "duration_ms": 8246,
+      "duration_ms": 8248,
       "notes": "Arabic clean-render with small_font degradation.",
       "ocr_text_excerpt": "\u062a\u0642\u0631\u064a\u0631 \u0627\u0644\u0645\u062e\u062a\u0628\u0631 \u0627\u0644\u0637\u0628\u064a\n\u062a\u0627\u0631\u064a\u062e \u0627\u0644\u062a\u0642\u0631\u064a\u0631"
     },
@@ -850,7 +849,7 @@
       "no_suggestion": false,
       "ocr_pages": 1,
       "native_pages": 0,
-      "duration_ms": 1041,
+      "duration_ms": 1063,
       "notes": "",
       "ocr_text_excerpt": "ADMISSION SUMMARY\nAdmission Date: 01/08/2026\nDischarge Date: 05/08/2026\nReport Date: 06/08/2026"
     },
@@ -878,7 +877,7 @@
       "no_suggestion": true,
       "ocr_pages": 1,
       "native_pages": 0,
-      "duration_ms": 1339,
+      "duration_ms": 1058,
       "notes": "",
       "ocr_text_excerpt": "Patient Result\nDate\nA001\nNegative 14/03/2026\nA002\nPositive 15/03/2026"
     },
@@ -906,7 +905,7 @@
       "no_suggestion": false,
       "ocr_pages": 1,
       "native_pages": 0,
-      "duration_ms": 552,
+      "duration_ms": 567,
       "notes": "",
       "ocr_text_excerpt": "REPORT\nReport Date: 14 March 2026"
     },
@@ -934,7 +933,7 @@
       "no_suggestion": true,
       "ocr_pages": 1,
       "native_pages": 0,
-      "duration_ms": 478,
+      "duration_ms": 527,
       "notes": "Bare ambiguous date with no label \u2014 M9 may withhold.",
       "ocr_text_excerpt": "03/04/2026\nSample result text here"
     },
@@ -963,7 +962,7 @@
       "no_suggestion": false,
       "ocr_pages": 1,
       "native_pages": 0,
-      "duration_ms": 546,
+      "duration_ms": 469,
       "notes": "",
       "ocr_text_excerpt": "Date of Birth: 21/06/1985\nReport Date: 14/03/2026"
     }

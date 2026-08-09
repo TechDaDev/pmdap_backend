@@ -570,6 +570,163 @@ def build_fixtures() -> list[Fixture]:
     return fixtures
 
 
+def build_expanded_fixtures() -> list[Fixture]:
+    """M16.1 expanded synthetic set — structural variants, no real content."""
+    return [
+        Fixture(
+            id="m161-en-upper-right-header",
+            language="en",
+            format="image_png",
+            quality="clean",
+            layout="header_footer",
+            digits="western",
+            lines=[
+                FixtureLine("Report Date: 17/09/2025", "report_date"),
+                FixtureLine("CITY GENERAL HOSPITAL - LAB DEPT"),
+                FixtureLine("Patient: X"),
+                FixtureLine("Result: Negative"),
+            ],
+            expected_report_date=_d("17/09/2025"),
+            expected_date_label="REPORT_DATE",
+        ),
+        Fixture(
+            id="m161-en-table-dob-app-report",
+            language="en",
+            format="image_png",
+            quality="clean",
+            layout="table",
+            digits="western",
+            lines=[
+                FixtureLine("Birthday        : 01/01/1986", "dob"),
+                FixtureLine("Date of Application : 14/09/2025", "application"),
+                FixtureLine("Report Date     : 17/09/2025", "report_date"),
+                FixtureLine("ESR : 20 mm/hr"),
+            ],
+            expected_report_date=_d("17/09/2025"),
+            expected_date_label="REPORT_DATE",
+            other_dates=[(_d("01/01/1986"), "DOB"), (_d("14/09/2025"), "APPLICATION")],
+        ),
+        Fixture(
+            id="m161-ar-unit-dept",
+            language="ar",
+            format="image_pdf",
+            quality="clean",
+            layout="lab_header",
+            digits="western",
+            lines=[
+                FixtureLine("دائرة صحة الكرخ"),
+                FixtureLine("مستشفى اليرموك التعليمي"),
+                FixtureLine("قسم المختبر"),
+                FixtureLine("تاريخ التقرير: 17/09/2025", "report_date"),
+            ],
+            expected_report_date=_d("17/09/2025"),
+            expected_date_label="REPORT_DATE",
+        ),
+        Fixture(
+            id="m161-en-barcode-distractor",
+            language="en",
+            format="image_png",
+            quality="clean",
+            layout="header_footer",
+            digits="western",
+            lines=[
+                FixtureLine("Barcode Number : 2057557", "barcode"),
+                FixtureLine("Patient Number : 1793663", "patient_number"),
+                FixtureLine("Report Date    : 17/09/2025", "report_date"),
+            ],
+            expected_report_date=_d("17/09/2025"),
+            expected_date_label="REPORT_DATE",
+        ),
+        Fixture(
+            id="m161-en-multipage-p1",
+            language="en",
+            format="image_png",
+            quality="clean",
+            layout="simple",
+            digits="western",
+            lines=[
+                FixtureLine("PAGE 1 OF 2"),
+                FixtureLine("Report Date: 17/09/2025", "report_date"),
+            ],
+            expected_report_date=_d("17/09/2025"),
+            expected_date_label="REPORT_DATE",
+        ),
+        Fixture(
+            id="m161-en-multipage-p2",
+            language="en",
+            format="image_png",
+            quality="clean",
+            layout="simple",
+            digits="western",
+            lines=[
+                FixtureLine("PAGE 2 OF 2"),
+                FixtureLine("Report Date: 17/09/2025", "report_date"),
+            ],
+            expected_report_date=_d("17/09/2025"),
+            expected_date_label="REPORT_DATE",
+        ),
+        Fixture(
+            id="m161-en-thin-light",
+            language="en",
+            format="image_png",
+            quality="low_contrast",
+            layout="simple",
+            digits="western",
+            lines=[
+                FixtureLine("THIN SCAN REPORT"),
+                FixtureLine("Report Date: 17/09/2025", "report_date"),
+            ],
+            expected_report_date=_d("17/09/2025"),
+            expected_date_label="REPORT_DATE",
+        ),
+        Fixture(
+            id="m161-en-skewed",
+            language="en",
+            format="image_png",
+            quality="rotation",
+            layout="simple",
+            digits="western",
+            lines=[
+                FixtureLine("PHOTOGRAPHED PAGE"),
+                FixtureLine("Report Date: 17/09/2025", "report_date"),
+            ],
+            expected_report_date=_d("17/09/2025"),
+            expected_date_label="REPORT_DATE",
+        ),
+        Fixture(
+            id="m161-en-generic-date-only",
+            language="en",
+            format="image_png",
+            quality="clean",
+            layout="simple",
+            digits="western",
+            lines=[
+                FixtureLine("MEDICAL RESULT"),
+                FixtureLine("Date : 17/09/2025", "report_date"),
+                FixtureLine("Result: Normal"),
+            ],
+            expected_report_date=_d("17/09/2025"),
+            expected_date_label="REPORT_DATE",
+            notes="Bare generic 'Date' label only — must still be suggested.",
+        ),
+        Fixture(
+            id="m161-en-compact-report-date",
+            language="en",
+            format="image_png",
+            quality="clean",
+            layout="simple",
+            digits="western",
+            lines=[
+                FixtureLine("Report Date"),
+                FixtureLine("17092025", "report_date"),
+            ],
+            expected_report_date=_d("17/09/2025"),
+            expected_date_label="REPORT_DATE",
+            notes="Compact labeled date (8 digits).",
+        ),
+    ]
+
+
 # ── Renderers ────────────────────────────────────────────────────────
 
 

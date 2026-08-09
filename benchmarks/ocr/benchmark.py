@@ -256,9 +256,22 @@ def main() -> int:
     )
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--dpi", type=int, default=DEFAULT_DPI)
+    parser.add_argument(
+        "--set",
+        choices=("frozen", "expanded", "all"),
+        default="frozen",
+        help="fixture set: frozen 34, expanded, or all",
+    )
     args = parser.parse_args()
 
-    fixtures = build_fixtures()
+    from benchmarks.ocr.fixtures import build_expanded_fixtures
+
+    if args.set == "expanded":
+        fixtures = build_expanded_fixtures()
+    elif args.set == "all":
+        fixtures = build_fixtures() + build_expanded_fixtures()
+    else:
+        fixtures = build_fixtures()
     if args.limit:
         fixtures = fixtures[: args.limit]
 
