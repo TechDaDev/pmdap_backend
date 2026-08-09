@@ -45,6 +45,7 @@ def make_document(
     department="",
     physician_name="",
     title="",
+    description="",
     processing_status="UPLOADED",
     archive_status="ACTIVE",
     created_at=None,
@@ -75,6 +76,7 @@ def make_document(
         department=department,
         physician_name=physician_name,
         title=title,
+        description=description,
         processing_status=processing_status,
         archive_status=archive_status,
     )
@@ -98,3 +100,22 @@ def verified_document(patient, uploaded_by, document_date, **kwargs):
     kwargs.setdefault("date_source", "USER_CONFIRMED")
     kwargs.setdefault("processing_status", "DATE_CONFIRMED")
     return make_document(patient, uploaded_by, **kwargs)
+
+
+def attach_text(document, text, *, method="PDF_TEXT"):
+    from processing.models import DocumentText
+
+    return DocumentText.objects.create(
+        document=document,
+        text=text,
+        page_count=1,
+        character_count=len(text),
+        meaningful_character_count=len(text.replace(" ", "")),
+        usable=True,
+        usability_reason="usable_pdf_text",
+        has_pages_requiring_ocr=False,
+        extraction_method=method,
+        extractor_name="PyMuPDF" if method == "PDF_TEXT" else "PaddleOCR",
+        extractor_version="1.28.0",
+        pipeline_version="m7-v1",
+    )

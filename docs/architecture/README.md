@@ -18,3 +18,4 @@ of rewriting their history.
 | [0011](0011-m11-facility-classification-metadata.md) | M11 facility and classification metadata | Accepted | 2026-08-09 |
 | [0012](0012-m12-chronological-archive.md) | M12 metadata-driven chronological archive | Accepted | 2026-08-09 |
 | [0013](0013-m12-archive-query-and-indexes.md) | M12 archive query and index strategy | Accepted | 2026-08-09 |
+| [0014](0014-m13-search.md) | M13 patient-scoped PostgreSQL search | Accepted | 2026-08-09 |

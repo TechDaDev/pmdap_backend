@@ -197,6 +197,10 @@ class MedicalDocument(UUIDModel):
                 fields=("patient", "archive_status", "healthcare_facility"),
                 name="archive_status_facility_idx",
             ),
+            models.Index(
+                fields=("patient", "archive_status", "created_at"),
+                name="archive_status_created_idx",
+            ),
         ]
 
     def __str__(self):

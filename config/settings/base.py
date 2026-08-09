@@ -177,6 +177,7 @@ DATE_TASK_TIME_LIMIT = int(os.getenv("DATE_TASK_TIME_LIMIT", "180"))
 ACCOUNT_CLAIM_ACTIVATION_MINUTES = int(
     os.getenv("ACCOUNT_CLAIM_ACTIVATION_MINUTES", "30")
 )
+SEARCH_QUERY_MAX_CHARS = int(os.getenv("SEARCH_QUERY_MAX_CHARS", "200"))
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
@@ -192,6 +193,7 @@ REST_FRAMEWORK = {
         "account_claim_submit": "5/hour",
         "account_claim_activation": "10/hour",
         "medical_document_upload": "20/hour",
+        "medical_search": "600/minute",
     },
     "EXCEPTION_HANDLER": "common.exceptions.api_exception_handler",
 }

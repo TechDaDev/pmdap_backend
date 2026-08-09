@@ -10,6 +10,7 @@ urlpatterns = [
     path("api/v1/auth/", include("accounts.urls")),
     path("api/v1/account-claims/", include("claims.urls")),
     path("api/v1/archive/", include("archive.urls")),
+    path("api/v1/search/", include("archive.search_urls")),
     path("api/v1/documents/", include("documents.urls")),
     path("api/v1/facilities/", include("facilities.urls")),
     path("api/v1/patients/", include("patients.urls")),
