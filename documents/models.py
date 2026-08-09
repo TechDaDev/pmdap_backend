@@ -92,6 +92,7 @@ class MedicalDocument(UUIDModel):
         PROCESSING = "PROCESSING", "Processing"
         TEXT_EXTRACTED = "TEXT_EXTRACTED", "Text extracted"
         OCR_REQUIRED = "OCR_REQUIRED", "OCR required"
+        OCR_PROCESSING = "OCR_PROCESSING", "OCR processing"
         DATE_DETECTED = "DATE_DETECTED", "Date detected"
         AWAITING_CONFIRMATION = "AWAITING_CONFIRMATION", "Awaiting confirmation"
         INDEXED = "INDEXED", "Indexed"
@@ -192,6 +193,11 @@ class MedicalDocumentEvent(UUIDModel):
         PDF_TEXT_EXTRACTED = "PDF_TEXT_EXTRACTED", "PDF text extracted"
         PDF_OCR_REQUIRED = "PDF_OCR_REQUIRED", "PDF OCR required"
         PDF_EXTRACTION_FAILED = "PDF_EXTRACTION_FAILED", "PDF extraction failed"
+        OCR_QUEUED = "OCR_QUEUED", "OCR queued"
+        OCR_STARTED = "OCR_STARTED", "OCR started"
+        OCR_PAGE_COMPLETED = "OCR_PAGE_COMPLETED", "OCR page completed"
+        OCR_COMPLETED = "OCR_COMPLETED", "OCR completed"
+        OCR_FAILED = "OCR_FAILED", "OCR failed"
 
     document = models.ForeignKey(
         MedicalDocument,

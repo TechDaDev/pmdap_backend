@@ -6,6 +6,8 @@ from common.models import UUIDModel
 class DocumentText(UUIDModel):
     class ExtractionMethod(models.TextChoices):
         PDF_TEXT = "PDF_TEXT", "PDF text"
+        OCR = "OCR", "OCR"
+        HYBRID = "HYBRID", "Hybrid"
 
     document = models.OneToOneField(
         "documents.MedicalDocument",
@@ -23,12 +25,19 @@ class DocumentText(UUIDModel):
     extractor_name = models.CharField(max_length=64)
     extractor_version = models.CharField(max_length=32)
     pipeline_version = models.CharField(max_length=32)
+    ocr_engine_name = models.CharField(max_length=64, blank=True, default="")
+    ocr_engine_version = models.CharField(max_length=32, blank=True, default="")
+    ocr_pipeline_version = models.CharField(max_length=32, blank=True, default="")
 
     def __str__(self):
         return str(self.uuid)
 
 
 class DocumentTextPage(UUIDModel):
+    class EffectiveSource(models.TextChoices):
+        PDF_TEXT = "PDF_TEXT", "PDF text"
+        OCR = "OCR", "OCR"
+
     document_text = models.ForeignKey(
         DocumentText,
         on_delete=models.CASCADE,
@@ -36,8 +45,22 @@ class DocumentTextPage(UUIDModel):
     )
     page_number = models.PositiveIntegerField()
     text = models.TextField(blank=True)
+    native_text = models.TextField(blank=True, default="")
+    ocr_text = models.TextField(blank=True, default="")
     meaningful_character_count = models.PositiveIntegerField()
     requires_ocr = models.BooleanField(default=False)
+    ocr_completed = models.BooleanField(default=False)
+    effective_source = models.CharField(
+        max_length=16,
+        choices=EffectiveSource,
+        default=EffectiveSource.PDF_TEXT,
+    )
+    ocr_engine_name = models.CharField(max_length=64, blank=True, default="")
+    ocr_engine_version = models.CharField(max_length=32, blank=True, default="")
+    ocr_mean_confidence = models.FloatField(null=True, blank=True)
+    ocr_minimum_confidence = models.FloatField(null=True, blank=True)
+    ocr_duration_ms = models.PositiveIntegerField(null=True, blank=True)
+    preprocessing_version = models.CharField(max_length=32, blank=True, default="")
 
     class Meta:
         ordering = ("page_number",)

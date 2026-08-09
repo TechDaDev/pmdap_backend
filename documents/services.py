@@ -127,6 +127,10 @@ def create_medical_document(*, patient, actor, upload, metadata, scanner=None):
                         document_uuid
                     )
                 )
+            else:
+                from processing.ocr_services import schedule_ocr
+
+                schedule_ocr(document, record_event=False)
         return document
     except IntegrityError as exc:
         if persisted_name:

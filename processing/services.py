@@ -256,8 +256,10 @@ def _persist_result(document_uuid, result, *, reprocess=False):
                         document_text=extracted,
                         page_number=page.page_number,
                         text=page.text,
+                        native_text=page.text,
                         meaningful_character_count=(page.meaningful_character_count),
                         requires_ocr=page.requires_ocr,
+                        effective_source=DocumentTextPage.EffectiveSource.PDF_TEXT,
                     )
                     for page in result.pages
                 ]
@@ -287,6 +289,10 @@ def _persist_result(document_uuid, result, *, reprocess=False):
                     "pages_requiring_ocr": len(metadata["pages_requiring_ocr"]),
                 },
             )
+            if extracted.has_pages_requiring_ocr:
+                from processing.ocr_services import schedule_ocr
+
+                schedule_ocr(document)
             return outcome
     except DatabaseError:
         return _mark_failure(document_uuid, "pdf_persistence_failed")
