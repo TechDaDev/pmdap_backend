@@ -49,3 +49,26 @@ def ocr_medical_document(self, document_uuid):
             countdown=countdown,
             max_retries=settings.OCR_TASK_MAX_RETRIES,
         ) from exc
+
+
+@shared_task(
+    bind=True,
+    name="processing.detect_document_dates",
+    soft_time_limit=settings.DATE_TASK_SOFT_TIME_LIMIT,
+    time_limit=settings.DATE_TASK_TIME_LIMIT,
+)
+def detect_document_dates(self, document_uuid):
+    from processing.date_services import (
+        RetryableDateProcessingError,
+        process_date_candidates,
+    )
+
+    try:
+        return process_date_candidates(document_uuid)
+    except RetryableDateProcessingError as exc:
+        countdown = settings.DATE_TASK_RETRY_BASE_SECONDS * (2**self.request.retries)
+        raise self.retry(
+            exc=exc,
+            countdown=countdown,
+            max_retries=settings.DATE_TASK_MAX_RETRIES,
+        ) from exc

@@ -4,6 +4,7 @@ from rest_framework import serializers
 
 from documents.models import MedicalDocument, StoredFile
 from documents.validation import inspect_medical_upload
+from processing.models import DateCandidate
 
 
 class RejectUnknownFieldsMixin:
@@ -119,3 +120,24 @@ class MedicalDocumentDetailSerializer(MedicalDocumentSerializer):
 
     def get_text_available(self, document) -> bool:
         return hasattr(document, "document_text")
+
+
+class DateCandidateSerializer(serializers.ModelSerializer):
+    date = serializers.DateField(source="detected_date", read_only=True)
+    type = serializers.CharField(source="candidate_type", read_only=True)
+    score = serializers.FloatField(read_only=True)
+
+    class Meta:
+        model = DateCandidate
+        fields = (
+            "date",
+            "alternative_date",
+            "type",
+            "score",
+            "page_number",
+            "context",
+            "source",
+            "ambiguous",
+            "is_suggested",
+        )
+        read_only_fields = fields

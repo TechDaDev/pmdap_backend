@@ -14,6 +14,7 @@ from documents.exceptions import (
 )
 from documents.models import MedicalDocument, StoredFile
 from documents.serializers import (
+    DateCandidateSerializer,
     MedicalDocumentDetailSerializer,
     MedicalDocumentMetadataSerializer,
     MedicalDocumentSerializer,
@@ -58,7 +59,7 @@ def active_document(patient, document_uuid):
         raise MedicalDocumentNotFound() from exc
 
 
-def page_response(request, queryset):
+def page_response(request, queryset, serializer_class=MedicalDocumentSerializer):
     paginator = PageNumberPagination()
     paginator.page_size = 20
     page = paginator.paginate_queryset(queryset, request)
@@ -68,7 +69,7 @@ def page_response(request, queryset):
                 "count": paginator.page.paginator.count,
                 "next": paginator.get_next_link(),
                 "previous": paginator.get_previous_link(),
-                "results": MedicalDocumentSerializer(page, many=True).data,
+                "results": serializer_class(page, many=True).data,
             }
         }
     )
@@ -268,6 +269,36 @@ class MedicalDocumentFileView(APIView):
         return stream_document(document)
 
 
+class MedicalDocumentDateCandidateView(APIView):
+    def get_patient(self, request, **kwargs):
+        del kwargs
+        return owned_profile(request.user)
+
+    @extend_schema(
+        operation_id="medical_document_date_candidate_list",
+        responses={
+            200: paginated_envelope(
+                "MedicalDocumentDateCandidateListSuccess",
+                DateCandidateSerializer(many=True),
+            ),
+            401: ErrorEnvelopeSerializer,
+            403: ErrorEnvelopeSerializer,
+            404: ErrorEnvelopeSerializer,
+        },
+        tags=["Medical documents"],
+    )
+    def get(self, request, document_uuid, **kwargs):
+        document = active_document(
+            self.get_patient(request, **kwargs),
+            document_uuid,
+        )
+        return page_response(
+            request,
+            document.date_candidates.all(),
+            DateCandidateSerializer,
+        )
+
+
 def authorized_minor_patient(request, minor_uuid):
     from guardians.api import authorized_minor_relationship
     from guardians.exceptions import GuardianNotVerified, GuardianRelationshipNotFound
@@ -301,5 +332,13 @@ class MinorMedicalDocumentDetailView(MedicalDocumentDetailView):
     get=extend_schema(operation_id="minor_medical_document_file_retrieve"),
 )
 class MinorMedicalDocumentFileView(MedicalDocumentFileView):
+    def get_patient(self, request, **kwargs):
+        return authorized_minor_patient(request, kwargs["minor_uuid"])
+
+
+@extend_schema_view(
+    get=extend_schema(operation_id="minor_medical_document_date_candidate_list"),
+)
+class MinorMedicalDocumentDateCandidateView(MedicalDocumentDateCandidateView):
     def get_patient(self, request, **kwargs):
         return authorized_minor_patient(request, kwargs["minor_uuid"])

@@ -426,6 +426,13 @@ def _persist(document_uuid, source_text_uuid, results):
                     "character_count": extracted.character_count,
                 },
             )
+            if (
+                document.processing_status
+                == MedicalDocument.ProcessingStatus.TEXT_EXTRACTED
+            ):
+                from processing.date_services import schedule_date_processing
+
+                schedule_date_processing(document)
             return document.processing_status
     except OCRError as exc:
         return _mark_failure(document_uuid, exc.code)

@@ -293,6 +293,10 @@ def _persist_result(document_uuid, result, *, reprocess=False):
                 from processing.ocr_services import schedule_ocr
 
                 schedule_ocr(document)
+            elif outcome == MedicalDocument.ProcessingStatus.TEXT_EXTRACTED:
+                from processing.date_services import schedule_date_processing
+
+                schedule_date_processing(document)
             return outcome
     except DatabaseError:
         return _mark_failure(document_uuid, "pdf_persistence_failed")
