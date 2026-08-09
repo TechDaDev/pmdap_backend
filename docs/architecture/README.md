@@ -14,3 +14,4 @@ of rewriting their history.
 | [0007](0007-m7-pdf-text-extraction.md) | M7 PDF text extraction | Accepted | 2026-08-09 |
 | [0008](0008-m8-ocr-subsystem.md) | M8 bounded multilingual OCR | Accepted | 2026-08-09 |
 | [0009](0009-m9-date-detection.md) | M9 deterministic multilingual date candidates | Accepted | 2026-08-09 |
+| [0010](0010-m10-report-date-authority.md) | M10 user-authoritative report dates | Accepted | 2026-08-09 |
