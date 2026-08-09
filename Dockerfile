@@ -32,7 +32,10 @@ USER root
 RUN python -m pip install -r requirements/ocr.txt
 
 RUN apt-get update && \
-    apt-get install --yes --no-install-recommends libgl1 libglib2.0-0 && \
+    apt-get install --yes --no-install-recommends \
+        libgl1 \
+        libglib2.0-0 \
+        libgomp1 && \
     rm -rf /var/lib/apt/lists/*
 
 ENV PADDLE_PDX_CACHE_HOME=/opt/paddle-cache \
