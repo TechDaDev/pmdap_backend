@@ -5,9 +5,7 @@ Django REST Framework, PostgreSQL, Redis, Celery, and versioned REST APIs.
 
 ## Delivery status
 
-M0-M5 are accepted. M6 private medical file storage and document uploads are
-implemented locally and await project-owner acceptance. M7 and later phases
-remain blocked.
+M0-M8 are accepted. M9 multilingual date detection is the active phase.
 
 ## Authoritative documents
 
@@ -29,11 +27,18 @@ analytics dashboards.
 
 ## Local test setup
 
-Requires Python 3.12+.
+Requires Python 3.12+ and Docker. PostgreSQL is the authoritative development
+database; Redis backs local cache and Celery services. Choose unused host ports
+in `.env` when 5432 or 6379 are already occupied.
 
 ```bash
+cp .env.example .env
+docker compose up -d db redis
 python3 -m venv .venv
 .venv/bin/pip install -r requirements/dev.txt
+. ./.env
+.venv/bin/python manage.py migrate --settings=config.settings.local
+.venv/bin/python manage.py check --settings=config.settings.local
 .venv/bin/pytest
 ```
 
@@ -92,7 +97,8 @@ Services:
 - Health: `http://localhost:8000/api/v1/health/`
 - OpenAPI: `http://localhost:8000/api/v1/schema/`
 - Swagger UI: `http://localhost:8000/api/v1/docs/`
-- PostgreSQL and Redis: container-network only; no host ports exposed
+- PostgreSQL: persistent named volume, host port `POSTGRES_HOST_PORT`
+- Redis: persistent named volume, host port `REDIS_HOST_PORT`
 - Identity images: private persistent volume; authorized API streaming only
 - Medical originals: separate private persistent volume; authorized attachment
   streaming only
