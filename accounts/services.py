@@ -3,6 +3,8 @@ from django.db import IntegrityError, transaction
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from audit.models import AuditLog
+from audit.services import record_audit
 from common.exceptions import InvalidCredentials
 from patients.services import create_patient_profile
 
@@ -31,7 +33,15 @@ def register_account(*, email, password, patient, phone=""):
         raise serializers.ValidationError(
             {"email": ["An account with this email already exists."]}
         ) from exc
-    create_patient_profile(user=user, **patient)
+    profile = create_patient_profile(user=user, **patient)
+    record_audit(
+        action=AuditLog.Action.ACCOUNT_CREATED,
+        actor=user,
+        patient=profile,
+        resource_type="USER",
+        resource_uuid=user.uuid,
+        new_values={"role": user.role, "status": user.status},
+    )
     return user
 
 

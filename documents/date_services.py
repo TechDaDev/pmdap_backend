@@ -4,6 +4,8 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
+from audit.models import AuditLog
+from audit.services import record_audit
 from documents.exceptions import (
     DateCandidateNotFound,
     DateCandidateStale,
@@ -112,6 +114,22 @@ def confirm_document_date(*, document, actor, candidate_id=None, manual_date=Non
             new_date=new_date,
             source=source,
             candidate=candidate,
+        )
+        record_audit(
+            action=(
+                AuditLog.Action.DATE_CORRECTED
+                if source == MedicalDocument.DateSource.USER_CORRECTED
+                else AuditLog.Action.DATE_CONFIRMED
+            ),
+            actor=actor,
+            patient=locked.patient,
+            resource_type="MEDICAL_DOCUMENT",
+            resource_uuid=locked.uuid,
+            previous_values={
+                "document_date": previous_date.isoformat() if previous_date else None
+            },
+            new_values={"document_date": new_date.isoformat()},
+            metadata={"date_source": source},
         )
     logger.info(
         "Document date decision persisted",

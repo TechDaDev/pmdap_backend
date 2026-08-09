@@ -7,6 +7,8 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from accounts.models import User
+from audit.models import AuditLog
+from audit.services import record_audit
 from guardians.exceptions import (
     GuardianNotVerified,
     GuardianRelationshipConflict,
@@ -207,6 +209,22 @@ def create_minor(*, guardian, idempotency_key, validated_data):
             creation.minor_patient = minor
             creation.relationship = relationship
             creation.save(update_fields=("minor_patient", "relationship", "updated_at"))
+            record_audit(
+                action=AuditLog.Action.MINOR_CREATED,
+                actor=guardian,
+                patient=minor,
+                resource_type="GUARDIAN_RELATIONSHIP",
+                resource_uuid=relationship.uuid,
+                new_values={"relationship": relationship.relationship},
+            )
+            record_audit(
+                action=AuditLog.Action.GUARDIAN_RELATIONSHIP_SUBMITTED,
+                actor=guardian,
+                patient=minor,
+                resource_type="GUARDIAN_RELATIONSHIP",
+                resource_uuid=relationship.uuid,
+                new_values={"relationship": relationship.relationship},
+            )
             return MinorCreationResult(minor, relationship, True)
     except Exception:
         for stored_file in stored_files:
@@ -259,6 +277,14 @@ def submit_guardian_relationship(*, guardian, minor, relationship_type):
                 event_type=GuardianRelationshipEvent.EventType.SUBMITTED,
                 actor=guardian,
                 metadata={},
+            )
+            record_audit(
+                action=AuditLog.Action.GUARDIAN_RELATIONSHIP_SUBMITTED,
+                actor=guardian,
+                patient=minor,
+                resource_type="GUARDIAN_RELATIONSHIP",
+                resource_uuid=relationship.uuid,
+                new_values={"relationship": relationship.relationship},
             )
             return relationship
     except IntegrityError as exc:
@@ -337,6 +363,19 @@ def approve_guardian_relationship(*, relationship, agent):
             actor=agent,
             metadata={},
         )
+        record_audit(
+            action=AuditLog.Action.GUARDIAN_RELATIONSHIP_VERIFIED,
+            actor=agent,
+            patient=relationship.minor_patient,
+            resource_type="GUARDIAN_RELATIONSHIP",
+            resource_uuid=relationship.uuid,
+            previous_values={
+                "verification_status": GuardianRelationship.VerificationStatus.PENDING
+            },
+            new_values={
+                "verification_status": GuardianRelationship.VerificationStatus.VERIFIED
+            },
+        )
         return relationship
 
 
@@ -383,6 +422,19 @@ def reject_guardian_relationship(*, relationship, agent, reason):
             event_type=GuardianRelationshipEvent.EventType.REJECTED,
             actor=agent,
             metadata={},
+        )
+        record_audit(
+            action=AuditLog.Action.GUARDIAN_RELATIONSHIP_REJECTED,
+            actor=agent,
+            patient=relationship.minor_patient,
+            resource_type="GUARDIAN_RELATIONSHIP",
+            resource_uuid=relationship.uuid,
+            previous_values={
+                "verification_status": GuardianRelationship.VerificationStatus.PENDING
+            },
+            new_values={
+                "verification_status": GuardianRelationship.VerificationStatus.REJECTED
+            },
         )
         return relationship
 

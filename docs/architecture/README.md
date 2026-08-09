@@ -19,3 +19,4 @@ of rewriting their history.
 | [0012](0012-m12-chronological-archive.md) | M12 metadata-driven chronological archive | Accepted | 2026-08-09 |
 | [0013](0013-m12-archive-query-and-indexes.md) | M12 archive query and index strategy | Accepted | 2026-08-09 |
 | [0014](0014-m13-search.md) | M13 patient-scoped PostgreSQL search | Accepted | 2026-08-09 |
+| [0015](0015-m14-audit-integrity.md) | M14 audit log and integrity hardening | Accepted | 2026-08-09 |

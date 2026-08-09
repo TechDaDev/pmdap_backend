@@ -9,6 +9,8 @@ from django.conf import settings
 from django.db import DatabaseError, transaction
 from django.utils import timezone
 
+from audit.models import AuditLog
+from audit.services import record_audit
 from documents.models import MedicalDocument, MedicalDocumentEvent, StoredFile
 from processing.extraction import PAGE_SEPARATOR, TextUsabilityEvaluator
 from processing.models import DocumentText, DocumentTextPage
@@ -198,6 +200,15 @@ def _mark_failure(document_uuid, code, *, retryable=False):
                 "retryable": retryable,
                 "canonical_preserved": hasattr(document, "document_text"),
             },
+        )
+        record_audit(
+            action=AuditLog.Action.OCR_FAILED,
+            actor_type=AuditLog.ActorType.SYSTEM,
+            patient=document.patient,
+            resource_type="MEDICAL_DOCUMENT",
+            resource_uuid=document.uuid,
+            new_values={"processing_status": document.processing_status},
+            metadata={"failure_code": code, "retryable": retryable},
         )
     logger.warning(
         "OCR processing failed",

@@ -86,6 +86,7 @@ def stream_document(document):
     if document.stored_file.integrity_status in {
         StoredFile.IntegrityStatus.CORRUPTED,
         StoredFile.IntegrityStatus.QUARANTINED,
+        StoredFile.IntegrityStatus.MISSING,
     }:
         raise MedicalFileUnavailable()
     try:

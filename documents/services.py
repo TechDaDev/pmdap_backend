@@ -6,6 +6,8 @@ from django.core.files.base import ContentFile
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
+from audit.models import AuditLog
+from audit.services import record_audit
 from documents.exceptions import (
     DuplicateMedicalDocument,
     MedicalDocumentNotFound,
@@ -149,6 +151,22 @@ def create_medical_document(*, patient, actor, upload, metadata, scanner=None):
                 actor,
                 {"malware_scan_status": scan_result.status},
             )
+            record_audit(
+                action=AuditLog.Action.DOCUMENT_UPLOADED,
+                actor=actor,
+                patient=patient,
+                resource_type="MEDICAL_DOCUMENT",
+                resource_uuid=document.uuid,
+                new_values={
+                    "document_type": document.document_type,
+                    "classification_source": document.classification_source,
+                    "processing_status": document.processing_status,
+                },
+                metadata={
+                    "stored_file": str(stored.uuid),
+                    "malware_scan_status": scan_result.status,
+                },
+            )
             if is_pdf:
                 _record_event(
                     document,
@@ -198,24 +216,56 @@ def _enqueue_pdf_extraction(document_uuid):
 
 
 def verify_stored_file_integrity(stored_file, *, actor=None):
-    status = (
-        StoredFile.IntegrityStatus.VALID
-        if _stored_digest(stored_file) == stored_file.sha256
-        else StoredFile.IntegrityStatus.CORRUPTED
-    )
-    stored_file.integrity_status = status
-    stored_file.save(update_fields=("integrity_status", "updated_at"))
+    with transaction.atomic():
+        locked = StoredFile.objects.select_for_update().get(pk=stored_file.pk)
+        try:
+            digest = _stored_digest(locked)
+            actual_size = locked.file.size
+        except (OSError, ValueError):
+            locked.integrity_status = StoredFile.IntegrityStatus.MISSING
+            locked.save(update_fields=("integrity_status", "updated_at"))
+            _record_integrity_evidence(locked, locked.integrity_status, actor)
+            return locked
+        if (actual_size is not None and actual_size != locked.size_bytes) or (
+            digest != locked.sha256
+        ):
+            locked.integrity_status = StoredFile.IntegrityStatus.CORRUPTED
+        else:
+            locked.integrity_status = StoredFile.IntegrityStatus.VALID
+        locked.save(update_fields=("integrity_status", "updated_at"))
+        _record_integrity_evidence(locked, locked.integrity_status, actor)
+        return locked
+
+
+def _record_integrity_evidence(stored_file, status, actor):
     try:
         document = stored_file.medical_document
     except MedicalDocument.DoesNotExist:
-        return stored_file
+        return
+    action = (
+        AuditLog.Action.INTEGRITY_FAILURE
+        if status
+        in {
+            StoredFile.IntegrityStatus.CORRUPTED,
+            StoredFile.IntegrityStatus.MISSING,
+        }
+        else AuditLog.Action.FILE_INTEGRITY_CHECKED
+    )
     _record_event(
         document,
         MedicalDocumentEvent.EventType.FILE_INTEGRITY_CHECKED,
         actor,
         {"integrity_status": status},
     )
-    return stored_file
+    record_audit(
+        action=action,
+        actor=actor,
+        patient=document.patient,
+        resource_type="MEDICAL_DOCUMENT",
+        resource_uuid=document.uuid,
+        new_values={"integrity_status": status},
+        metadata={"stored_file": str(stored_file.uuid)},
+    )
 
 
 def update_medical_document(*, document, actor, metadata):
@@ -293,6 +343,44 @@ def update_medical_document(*, document, actor, metadata):
             )
         for event_type, event_metadata in events:
             _record_event(locked, event_type, actor, event_metadata)
+        if "document_type" in changed_fields:
+            record_audit(
+                action=AuditLog.Action.DOCUMENT_TYPE_CHANGED,
+                actor=actor,
+                patient=locked.patient,
+                resource_type="MEDICAL_DOCUMENT",
+                resource_uuid=locked.uuid,
+                previous_values={"document_type": old_type},
+                new_values={"document_type": locked.document_type},
+            )
+        if "healthcare_facility" in changed_fields:
+            record_audit(
+                action=AuditLog.Action.DOCUMENT_FACILITY_CHANGED,
+                actor=actor,
+                patient=locked.patient,
+                resource_type="MEDICAL_DOCUMENT",
+                resource_uuid=locked.uuid,
+                previous_values={
+                    "healthcare_facility": str(old_facility_id)
+                    if old_facility_id
+                    else None
+                },
+                new_values={
+                    "healthcare_facility": str(locked.healthcare_facility_id)
+                    if locked.healthcare_facility_id
+                    else None
+                },
+            )
+        generic_changed = sorted({"title", "description"}.intersection(changed_fields))
+        if generic_changed:
+            record_audit(
+                action=AuditLog.Action.DOCUMENT_METADATA_UPDATED,
+                actor=actor,
+                patient=locked.patient,
+                resource_type="MEDICAL_DOCUMENT",
+                resource_uuid=locked.uuid,
+                metadata={"fields": generic_changed},
+            )
     return locked
 
 
@@ -320,5 +408,12 @@ def soft_delete_medical_document(*, document, actor):
             locked,
             MedicalDocumentEvent.EventType.DELETED,
             actor,
+        )
+        record_audit(
+            action=AuditLog.Action.DOCUMENT_DELETED,
+            actor=actor,
+            patient=locked.patient,
+            resource_type="MEDICAL_DOCUMENT",
+            resource_uuid=locked.uuid,
         )
     return locked

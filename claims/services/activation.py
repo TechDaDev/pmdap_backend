@@ -7,6 +7,8 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from accounts.models import User
+from audit.models import AuditLog
+from audit.services import record_audit
 from claims.exceptions import InvalidActivationToken
 from claims.models import AccountActivation, PatientAccountClaimEvent
 
@@ -45,5 +47,14 @@ def activate_claimed_account(*, token, new_password):
             event_type=PatientAccountClaimEvent.EventType.ACTIVATED,
             actor=user,
             metadata={},
+        )
+        record_audit(
+            action=AuditLog.Action.ACCOUNT_ACTIVATED,
+            actor=user,
+            patient=activation.claim.patient,
+            resource_type="USER",
+            resource_uuid=user.uuid,
+            previous_values={"status": User.Status.PENDING_ACTIVATION},
+            new_values={"status": User.Status.ACTIVE},
         )
         return user

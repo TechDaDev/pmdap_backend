@@ -14,6 +14,7 @@ class StoredFile(UUIDModel):
         VALID = "VALID", "Valid"
         CORRUPTED = "CORRUPTED", "Corrupted"
         QUARANTINED = "QUARANTINED", "Quarantined"
+        MISSING = "MISSING", "Missing"
 
     class MalwareScanStatus(models.TextChoices):
         NOT_CONFIGURED = "NOT_CONFIGURED", "Not configured"

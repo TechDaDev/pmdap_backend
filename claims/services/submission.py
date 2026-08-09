@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
 
+from audit.models import AuditLog
+from audit.services import record_audit
 from claims.models import (
     ClaimIdentityEvidence,
     PatientAccountClaim,
@@ -117,6 +119,14 @@ def submit_account_claim(validated_data):
                 claim=claim,
                 event_type=PatientAccountClaimEvent.EventType.SUBMITTED,
                 metadata={},
+            )
+            record_audit(
+                action=AuditLog.Action.CLAIM_SUBMITTED,
+                actor=None,
+                patient=profile,
+                resource_type="ACCOUNT_CLAIM",
+                resource_uuid=claim.uuid,
+                new_values={"status": claim.status},
             )
         return ClaimReceipt(claim.uuid)
     except IntegrityError:

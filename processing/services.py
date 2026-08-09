@@ -7,6 +7,8 @@ from django.conf import settings
 from django.db import DatabaseError, transaction
 from django.utils import timezone
 
+from audit.models import AuditLog
+from audit.services import record_audit
 from documents.models import MedicalDocument, MedicalDocumentEvent, StoredFile
 from processing.extraction import PDFExtractionError, PDFTextExtractor, PDFTextResult
 from processing.models import DocumentText, DocumentTextPage
@@ -36,6 +38,18 @@ def _canonical_outcome(document_text):
         MedicalDocument.ProcessingStatus.TEXT_EXTRACTED
         if document_text.usable
         else MedicalDocument.ProcessingStatus.OCR_REQUIRED
+    )
+
+
+def _audit_processing_failure(document, action, code, retryable):
+    record_audit(
+        action=action,
+        actor_type=AuditLog.ActorType.SYSTEM,
+        patient=document.patient,
+        resource_type="MEDICAL_DOCUMENT",
+        resource_uuid=document.uuid,
+        new_values={"processing_status": document.processing_status},
+        metadata={"failure_code": code, "retryable": retryable},
     )
 
 
@@ -93,6 +107,9 @@ def _mark_failure(document_uuid, code, *, retryable=False):
             MedicalDocumentEvent.EventType.PDF_EXTRACTION_FAILED,
             {"failure_code": code, "retryable": retryable},
         )
+        _audit_processing_failure(
+            document, AuditLog.Action.PDF_EXTRACTION_FAILED, code, retryable
+        )
     logger.warning(
         "PDF extraction failed",
         extra={
@@ -117,8 +134,25 @@ def _read_verified_content(stored_file):
     if len(content) != stored_file.size_bytes or digest != stored_file.sha256:
         stored_file.integrity_status = StoredFile.IntegrityStatus.CORRUPTED
         stored_file.save(update_fields=("integrity_status", "updated_at"))
+        _audit_integrity_failure(stored_file, "medical_file_integrity_mismatch")
         return None, "medical_file_integrity_mismatch"
     return content, ""
+
+
+def _audit_integrity_failure(stored_file, failure_code):
+    try:
+        document = stored_file.medical_document
+    except MedicalDocument.DoesNotExist:
+        return
+    record_audit(
+        action=AuditLog.Action.INTEGRITY_FAILURE,
+        actor_type=AuditLog.ActorType.SYSTEM,
+        patient=document.patient,
+        resource_type="MEDICAL_DOCUMENT",
+        resource_uuid=document.uuid,
+        new_values={"integrity_status": stored_file.integrity_status},
+        metadata={"failure_code": failure_code},
+    )
 
 
 def _valid_result(result, stored_file):

@@ -8,6 +8,8 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils import timezone
 
+from audit.models import AuditLog
+from audit.services import record_audit
 from claims.exceptions import (
     AccountClaimConflict,
     AccountClaimNotFound,
@@ -94,6 +96,20 @@ def transition_claim(*, claim, agent, status, reason):
         PatientAccountClaimEvent.objects.create(
             claim=claim, event_type=event_type, actor=agent, metadata={"reason": reason}
         )
+        record_audit(
+            action=(
+                AuditLog.Action.CLAIM_REJECTED
+                if status == PatientAccountClaim.Status.REJECTED
+                else AuditLog.Action.CLAIM_MORE_INFORMATION_REQUIRED
+            ),
+            actor=agent,
+            patient=claim.patient,
+            resource_type="ACCOUNT_CLAIM",
+            resource_uuid=claim.uuid,
+            previous_values={"status": "PENDING"},
+            new_values={"status": status},
+            metadata={"reason_code": "review_decision"},
+        )
         return claim
 
 
@@ -145,6 +161,14 @@ def approve_account_claim(*, claim, agent):
             actor=agent,
             metadata={},
         )
+        record_audit(
+            action=AuditLog.Action.PATIENT_ACCOUNT_LINKED,
+            actor=agent,
+            patient=profile,
+            resource_type="USER",
+            resource_uuid=user.uuid,
+            new_values={"status": user.status},
+        )
         now = timezone.now()
         relationships = GuardianRelationship.objects.select_for_update().filter(
             minor_patient=profile, active=True
@@ -164,6 +188,15 @@ def approve_account_claim(*, claim, agent):
                 actor=agent,
                 metadata={"reason": "PATIENT_REACHED_ADULTHOOD"},
             )
+            record_audit(
+                action=AuditLog.Action.GUARDIAN_ACCESS_EXPIRED,
+                actor=agent,
+                patient=profile,
+                resource_type="GUARDIAN_RELATIONSHIP",
+                resource_uuid=relationship.uuid,
+                new_values={"active": False},
+                metadata={"reason": "PATIENT_REACHED_ADULTHOOD"},
+            )
         raw_token = secrets.token_urlsafe(32)
         expires_at = now + timedelta(
             minutes=getattr(settings, "ACCOUNT_CLAIM_ACTIVATION_MINUTES", 30)
@@ -179,6 +212,14 @@ def approve_account_claim(*, claim, agent):
             event_type=PatientAccountClaimEvent.EventType.ACTIVATION_CREATED,
             actor=agent,
             metadata={},
+        )
+        record_audit(
+            action=AuditLog.Action.ACCOUNT_ACTIVATION_CREATED,
+            actor=agent,
+            patient=profile,
+            resource_type="ACCOUNT_CLAIM",
+            resource_uuid=claim.uuid,
+            new_values={"expires_minutes": settings.ACCOUNT_CLAIM_ACTIVATION_MINUTES},
         )
         claim.status = PatientAccountClaim.Status.APPROVED
         claim.reviewed_by = agent
@@ -200,6 +241,15 @@ def approve_account_claim(*, claim, agent):
             event_type=PatientAccountClaimEvent.EventType.APPROVED,
             actor=agent,
             metadata={},
+        )
+        record_audit(
+            action=AuditLog.Action.CLAIM_APPROVED,
+            actor=agent,
+            patient=profile,
+            resource_type="ACCOUNT_CLAIM",
+            resource_uuid=claim.uuid,
+            previous_values={"status": "PENDING"},
+            new_values={"status": claim.status},
         )
         return ApprovalResult(
             claim.uuid, user.uuid, claim.status, raw_token, expires_at

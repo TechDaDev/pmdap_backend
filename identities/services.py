@@ -12,6 +12,8 @@ from django.utils import timezone
 from PIL import Image, UnidentifiedImageError
 
 from accounts.models import User
+from audit.models import AuditLog
+from audit.services import record_audit
 from identities.exceptions import IdentityDocumentConflict, IdentityTransitionConflict
 from identities.models import IdentityDocument, IdentityDocumentEvent, IdentityFile
 from patients.models import PatientProfile
@@ -125,8 +127,18 @@ def _sync_profile_identity_status(profile):
     else:
         new_status = PatientProfile.IdentityStatus.UNVERIFIED
     if profile.identity_status != new_status:
+        previous = profile.identity_status
         PatientProfile.objects.filter(pk=profile.pk).update(identity_status=new_status)
         profile.identity_status = new_status
+        record_audit(
+            action=AuditLog.Action.PATIENT_IDENTITY_STATUS_CHANGED,
+            actor_type=AuditLog.ActorType.SYSTEM,
+            patient=profile,
+            resource_type="PATIENT",
+            resource_uuid=profile.uuid,
+            previous_values={"identity_status": previous},
+            new_values={"identity_status": new_status},
+        )
     return new_status
 
 
@@ -196,6 +208,26 @@ def submit_identity_document(*, patient, actor, validated_data, replaces=None):
                 else IdentityDocumentEvent.EventType.UPLOADED
             )
             _record_event(document, event_type, actor)
+            record_audit(
+                action=(
+                    AuditLog.Action.IDENTITY_DOCUMENT_REPLACED
+                    if source
+                    else AuditLog.Action.IDENTITY_DOCUMENT_UPLOADED
+                ),
+                actor=actor,
+                patient=patient,
+                resource_type="IDENTITY_DOCUMENT",
+                resource_uuid=document.uuid,
+                new_values={
+                    "document_type": document.document_type,
+                    "status": document.status,
+                    "verification_status": document.verification_status,
+                },
+                metadata={
+                    "replaces": str(source.uuid) if source else None,
+                    "identity_file": str(front.uuid),
+                },
+            )
             _sync_profile_identity_status(patient)
             return document
     except Exception:
@@ -236,6 +268,16 @@ def approve_identity_document(*, document, agent):
             previous.status = IdentityDocument.LifecycleStatus.REPLACED
             previous.save(update_fields=("status", "updated_at"))
             _record_event(previous, IdentityDocumentEvent.EventType.REPLACED, agent)
+            record_audit(
+                action=AuditLog.Action.IDENTITY_DOCUMENT_REPLACED,
+                actor=agent,
+                patient=document.patient,
+                resource_type="IDENTITY_DOCUMENT",
+                resource_uuid=document.uuid,
+                previous_values={"status": IdentityDocument.LifecycleStatus.CURRENT},
+                new_values={"status": IdentityDocument.LifecycleStatus.REPLACED},
+                metadata={"replaced_document": str(previous.uuid)},
+            )
         elif (
             IdentityDocument.objects.filter(
                 patient_id=document.patient_id,
@@ -262,6 +304,19 @@ def approve_identity_document(*, document, agent):
             )
         )
         _record_event(document, IdentityDocumentEvent.EventType.VERIFIED, agent)
+        record_audit(
+            action=AuditLog.Action.IDENTITY_DOCUMENT_VERIFIED,
+            actor=agent,
+            patient=document.patient,
+            resource_type="IDENTITY_DOCUMENT",
+            resource_uuid=document.uuid,
+            previous_values={
+                "verification_status": IdentityDocument.VerificationStatus.PENDING
+            },
+            new_values={
+                "verification_status": IdentityDocument.VerificationStatus.VERIFIED
+            },
+        )
         _sync_profile_identity_status(profile)
         return document
 
@@ -296,5 +351,18 @@ def reject_identity_document(*, document, agent, reason):
             )
         )
         _record_event(document, IdentityDocumentEvent.EventType.REJECTED, agent)
+        record_audit(
+            action=AuditLog.Action.IDENTITY_DOCUMENT_REJECTED,
+            actor=agent,
+            patient=document.patient,
+            resource_type="IDENTITY_DOCUMENT",
+            resource_uuid=document.uuid,
+            previous_values={
+                "verification_status": IdentityDocument.VerificationStatus.PENDING
+            },
+            new_values={
+                "verification_status": IdentityDocument.VerificationStatus.REJECTED
+            },
+        )
         _sync_profile_identity_status(profile)
         return document
