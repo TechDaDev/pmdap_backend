@@ -27,6 +27,8 @@ from patients.models import PatientProfile  # noqa: E402
 FINAL_STATES = {
     MedicalDocument.ProcessingStatus.DATE_DETECTED,
     MedicalDocument.ProcessingStatus.DATE_NOT_FOUND,
+    MedicalDocument.ProcessingStatus.AWAITING_CONFIRMATION,
+    MedicalDocument.ProcessingStatus.DATE_CONFIRMED,
     MedicalDocument.ProcessingStatus.FAILED,
 }
 
@@ -106,7 +108,10 @@ def _run_flow(client, upload, *, timeout):
         if document.processing_status in FINAL_STATES:
             break
         time.sleep(1)
-    if document.processing_status != MedicalDocument.ProcessingStatus.DATE_DETECTED:
+    if document.processing_status not in {
+        MedicalDocument.ProcessingStatus.AWAITING_CONFIRMATION,
+        MedicalDocument.ProcessingStatus.DATE_CONFIRMED,
+    }:
         raise RuntimeError(
             "M9 did not complete; "
             f"document={document.uuid} final_status={document.processing_status} "

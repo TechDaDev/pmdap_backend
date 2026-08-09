@@ -184,6 +184,20 @@ class MedicalDocument(UUIDModel):
                 name="documents_active_patient_content_unique",
             )
         ]
+        indexes = [
+            models.Index(
+                fields=("patient", "archive_status", "document_date"),
+                name="archive_status_date_idx",
+            ),
+            models.Index(
+                fields=("patient", "archive_status", "document_type"),
+                name="archive_status_type_idx",
+            ),
+            models.Index(
+                fields=("patient", "archive_status", "healthcare_facility"),
+                name="archive_status_facility_idx",
+            ),
+        ]
 
     def __str__(self):
         return str(self.uuid)

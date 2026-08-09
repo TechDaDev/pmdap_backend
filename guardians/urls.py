@@ -1,5 +1,6 @@
 from django.urls import path
 
+from archive.api import MinorArchiveSummaryView, MinorArchiveView
 from documents.api import (
     MinorMedicalDocumentCollectionView,
     MinorMedicalDocumentDateCandidateView,
@@ -12,6 +13,16 @@ from guardians.api import MinorCollectionView, MinorDetailView
 urlpatterns = [
     path("", MinorCollectionView.as_view(), name="minor-list-create"),
     path("<uuid:minor_uuid>/", MinorDetailView.as_view(), name="minor-detail"),
+    path(
+        "<uuid:minor_uuid>/archive/",
+        MinorArchiveView.as_view(),
+        name="minor-archive-list",
+    ),
+    path(
+        "<uuid:minor_uuid>/archive/summary/",
+        MinorArchiveSummaryView.as_view(),
+        name="minor-archive-summary",
+    ),
     path(
         "<uuid:minor_uuid>/documents/",
         MinorMedicalDocumentCollectionView.as_view(),
