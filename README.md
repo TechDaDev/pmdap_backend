@@ -15,6 +15,7 @@ M0-M8 are accepted. M9 multilingual date detection is the active phase.
 - [M4 minor/guardian design](docs/superpowers/specs/2026-08-08-m4-minors-guardians-design.md)
 - [M5 adult account-claiming design](docs/superpowers/specs/2026-08-08-m5-adult-account-claiming-design.md)
 - [M6 medical file storage design](docs/superpowers/specs/2026-08-09-m6-medical-file-storage-design.md)
+- [M9 date detection design](docs/superpowers/specs/2026-08-09-m9-date-detection-design.md)
 - [Architecture decisions](docs/architecture/README.md)
 - [Contributor and agent rules](AGENTS.md)
 
