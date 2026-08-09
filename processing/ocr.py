@@ -161,9 +161,8 @@ class PaddleOCREngine(OCREngine):
                 from paddleocr import PaddleOCR
 
                 options = {
-                    "lang": settings.OCR_LANGUAGE,
-                    "ocr_version": settings.OCR_MODEL_VERSION,
                     "device": "cpu",
+                    "enable_mkldnn": False,
                     "use_doc_orientation_classify": False,
                     "use_doc_unwarping": False,
                     "use_textline_orientation": False,
@@ -172,9 +171,17 @@ class PaddleOCREngine(OCREngine):
                     options["text_detection_model_dir"] = (
                         settings.OCR_TEXT_DETECTION_MODEL_DIR
                     )
+                else:
+                    options["text_detection_model_name"] = (
+                        settings.OCR_TEXT_DETECTION_MODEL_NAME
+                    )
                 if settings.OCR_TEXT_RECOGNITION_MODEL_DIR:
                     options["text_recognition_model_dir"] = (
                         settings.OCR_TEXT_RECOGNITION_MODEL_DIR
+                    )
+                else:
+                    options["text_recognition_model_name"] = (
+                        settings.OCR_TEXT_RECOGNITION_MODEL_NAME
                     )
                 pipeline = PaddleOCR(**options)
             except Exception as exc:

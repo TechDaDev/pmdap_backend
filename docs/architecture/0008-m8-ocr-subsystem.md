@@ -26,11 +26,14 @@ Unicode text, ordered lines, confidence aggregates, engine/version, duration,
 and preprocessing provenance. Engine output is validated before persistence.
 Medical-document services depend on the contract, not PaddleOCR internals.
 
-PaddleOCR 3.7.0 with PaddlePaddle 3.3.1 CPU is pinned. PP-OCRv5 is selected
-with `lang=ar`: its Arabic recognition model supports Arabic, Persian, English,
-and digits in one deterministic pass. PP-OCRv6 is not selected because its
-unified 50-language model does not include Arabic. No cloud API, VLM, GPU, or
-second OCR engine is used.
+PaddleOCR 3.7.0 with PaddlePaddle 3.3.0 CPU is pinned. The exact
+`PP-OCRv5_mobile_det` and `arabic_PP-OCRv5_mobile_rec` models are selected; the
+recognizer supports Arabic, Persian, English, and digits in one deterministic
+pass. Explicit names avoid PaddleOCR falling back to PP-OCRv6 when only one
+model is overridden. No cloud API, VLM, GPU, or second OCR engine is used.
+oneDNN is disabled because PaddlePaddle 3.3.x CPU inference has an unresolved
+PIR attribute-conversion failure on these PP-OCRv5 models; standard CPU kernels
+are the verified M8 path.
 
 ### Native-first page canonicalization
 
@@ -99,8 +102,8 @@ completed OCR text remain preserved.
 ## Defaults
 
 - `OCR_ENGINE=paddleocr`
-- `OCR_LANGUAGE=ar`
-- `OCR_MODEL_VERSION=PP-OCRv5`
+- `OCR_TEXT_DETECTION_MODEL_NAME=PP-OCRv5_mobile_det`
+- `OCR_TEXT_RECOGNITION_MODEL_NAME=arabic_PP-OCRv5_mobile_rec`
 - `OCR_PDF_RENDER_DPI=300`; maximum 400
 - `OCR_MAX_IMAGE_PIXELS=20000000`
 - `OCR_MAX_WIDTH=6000`; `OCR_MAX_HEIGHT=6000`

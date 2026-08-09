@@ -40,6 +40,29 @@ def test_ocr_engine_contract_is_replaceable():
         OCREngine().extract_image(Image.new("RGB", (10, 10)))
 
 
+def test_paddle_adapter_initializes_cpu_mobile_multilingual_pipeline(monkeypatch):
+    pipeline = Mock()
+    paddle_ocr = Mock(return_value=pipeline)
+    monkeypatch.setitem(
+        sys.modules,
+        "paddleocr",
+        SimpleNamespace(__version__="3.7.0", PaddleOCR=paddle_ocr),
+    )
+
+    engine = PaddleOCREngine()
+
+    assert engine.pipeline is pipeline
+    paddle_ocr.assert_called_once_with(
+        text_detection_model_name="PP-OCRv5_mobile_det",
+        text_recognition_model_name="arabic_PP-OCRv5_mobile_rec",
+        device="cpu",
+        enable_mkldnn=False,
+        use_doc_orientation_classify=False,
+        use_doc_unwarping=False,
+        use_textline_orientation=False,
+    )
+
+
 def test_paddle_adapter_returns_structured_unicode_and_confidence(monkeypatch):
     monkeypatch.setitem(sys.modules, "paddleocr", SimpleNamespace(__version__="3.7.0"))
     pipeline = Mock()
