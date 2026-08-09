@@ -52,7 +52,11 @@ def paginated_envelope(name, child):
 def active_document(patient, document_uuid):
     try:
         return MedicalDocument.objects.select_related(
-            "stored_file", "document_text"
+            "stored_file",
+            "document_text",
+            "healthcare_facility__country",
+            "healthcare_facility__region",
+            "healthcare_facility__city",
         ).get(
             uuid=document_uuid,
             patient=patient,
@@ -126,9 +130,18 @@ class MedicalDocumentCollectionView(APIView):
     )
     def get(self, request, **kwargs):
         patient = self.get_patient(request, **kwargs)
-        queryset = MedicalDocument.objects.select_related("stored_file").filter(
-            patient=patient,
-            archive_status=MedicalDocument.ArchiveStatus.ACTIVE,
+        queryset = (
+            MedicalDocument.objects.select_related(
+                "stored_file",
+                "healthcare_facility__country",
+                "healthcare_facility__region",
+                "healthcare_facility__city",
+            )
+            .prefetch_related("healthcare_facility__aliases")
+            .filter(
+                patient=patient,
+                archive_status=MedicalDocument.ArchiveStatus.ACTIVE,
+            )
         )
         return page_response(request, queryset)
 
@@ -212,6 +225,7 @@ class MedicalDocumentDetailView(APIView):
             401: ErrorEnvelopeSerializer,
             403: ErrorEnvelopeSerializer,
             404: ErrorEnvelopeSerializer,
+            409: ErrorEnvelopeSerializer,
         },
         tags=["Medical documents"],
     )

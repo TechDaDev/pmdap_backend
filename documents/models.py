@@ -86,6 +86,11 @@ class MedicalDocument(UUIDModel):
         USER_CONFIRMED = "USER_CONFIRMED", "User confirmed"
         USER_CORRECTED = "USER_CORRECTED", "User corrected"
 
+    class ClassificationSource(models.TextChoices):
+        USER_SELECTED = "USER_SELECTED", "User selected"
+        GUARDIAN_SELECTED = "GUARDIAN_SELECTED", "Guardian selected"
+        SYSTEM_DEFAULT = "SYSTEM_DEFAULT", "System default"
+
     class ProcessingStatus(models.TextChoices):
         UPLOADED = "UPLOADED", "Uploaded"
         QUEUED = "QUEUED", "Queued"
@@ -122,6 +127,11 @@ class MedicalDocument(UUIDModel):
     )
     content_sha256 = models.CharField(max_length=64, editable=False)
     document_type = models.CharField(max_length=32, choices=DocumentType)
+    classification_source = models.CharField(
+        max_length=24,
+        choices=ClassificationSource,
+        default=ClassificationSource.SYSTEM_DEFAULT,
+    )
     title = models.CharField(max_length=255, blank=True)
     description = models.TextField(blank=True)
     document_date = models.DateField(null=True, blank=True)
@@ -134,6 +144,13 @@ class MedicalDocument(UUIDModel):
     date_verified = models.BooleanField(default=False)
     date_verified_at = models.DateTimeField(null=True, blank=True)
     facility_name = models.CharField(max_length=255, blank=True)
+    healthcare_facility = models.ForeignKey(
+        "facilities.HealthcareFacility",
+        on_delete=models.PROTECT,
+        related_name="medical_documents",
+        null=True,
+        blank=True,
+    )
     location_text = models.CharField(max_length=255, blank=True)
     department = models.CharField(max_length=255, blank=True)
     physician_name = models.CharField(max_length=255, blank=True)
@@ -178,6 +195,23 @@ class MedicalDocumentEvent(UUIDModel):
         METADATA_UPDATED = (
             "MEDICAL_DOCUMENT_METADATA_UPDATED",
             "Metadata updated",
+        )
+        DOCUMENT_TYPE_CHANGED = "DOCUMENT_TYPE_CHANGED", "Document type changed"
+        DOCUMENT_FACILITY_CHANGED = (
+            "DOCUMENT_FACILITY_CHANGED",
+            "Document facility changed",
+        )
+        DOCUMENT_LOCATION_UPDATED = (
+            "DOCUMENT_LOCATION_UPDATED",
+            "Document location updated",
+        )
+        DOCUMENT_DEPARTMENT_UPDATED = (
+            "DOCUMENT_DEPARTMENT_UPDATED",
+            "Document department updated",
+        )
+        DOCUMENT_PHYSICIAN_METADATA_UPDATED = (
+            "DOCUMENT_PHYSICIAN_METADATA_UPDATED",
+            "Document physician metadata updated",
         )
         DELETED = "MEDICAL_DOCUMENT_DELETED", "Deleted"
         DUPLICATE_REJECTED = (

@@ -4,6 +4,7 @@ from rest_framework import serializers
 
 from documents.models import MedicalDocument, StoredFile
 from documents.validation import inspect_medical_upload
+from facilities.serializers import HealthcareFacilitySerializer
 from processing.models import DateCandidate
 
 
@@ -37,7 +38,7 @@ class MedicalDocumentMetadataSerializer(
         allow_blank=True,
         trim_whitespace=True,
     )
-    document_date = serializers.DateField(required=False, allow_null=True)
+    healthcare_facility_id = serializers.UUIDField(required=False, allow_null=True)
     facility_name = serializers.CharField(
         max_length=255, required=False, allow_blank=True, trim_whitespace=True
     )
@@ -51,17 +52,18 @@ class MedicalDocumentMetadataSerializer(
         max_length=255, required=False, allow_blank=True, trim_whitespace=True
     )
 
+
+class MedicalDocumentUploadSerializer(MedicalDocumentMetadataSerializer):
+    file = serializers.FileField()
+    document_date = serializers.DateField(required=False, allow_null=True)
+    document_type = serializers.ChoiceField(
+        choices=MedicalDocument.DocumentType.choices
+    )
+
     def validate_document_date(self, value):
         if value is not None and value > timezone.localdate():
             raise serializers.ValidationError("Document date cannot be in the future.")
         return value
-
-
-class MedicalDocumentUploadSerializer(MedicalDocumentMetadataSerializer):
-    file = serializers.FileField()
-    document_type = serializers.ChoiceField(
-        choices=MedicalDocument.DocumentType.choices
-    )
 
     def validate_file(self, value):
         try:
@@ -87,12 +89,14 @@ class StoredFilePublicSerializer(serializers.ModelSerializer):
 
 class MedicalDocumentSerializer(serializers.ModelSerializer):
     file = StoredFilePublicSerializer(source="stored_file", read_only=True)
+    healthcare_facility = HealthcareFacilitySerializer(read_only=True)
 
     class Meta:
         model = MedicalDocument
         fields = (
             "uuid",
             "document_type",
+            "classification_source",
             "title",
             "description",
             "document_date",
@@ -100,6 +104,7 @@ class MedicalDocumentSerializer(serializers.ModelSerializer):
             "date_verified",
             "date_verified_at",
             "facility_name",
+            "healthcare_facility",
             "location_text",
             "department",
             "physician_name",

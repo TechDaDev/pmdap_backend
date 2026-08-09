@@ -14,17 +14,43 @@ from documents.exceptions import (
 from documents.models import MedicalDocument, MedicalDocumentEvent, StoredFile
 from documents.scanning import default_file_security_scanner
 from documents.validation import inspect_medical_upload
+from facilities.exceptions import (
+    HealthcareFacilityInactive,
+    HealthcareFacilityNotFound,
+)
+from facilities.models import HealthcareFacility
 
 EDITABLE_METADATA_FIELDS = (
     "document_type",
     "title",
     "description",
-    "document_date",
     "facility_name",
     "location_text",
     "department",
     "physician_name",
 )
+
+
+def _classification_source(patient, actor):
+    if patient.user_id == actor.pk:
+        return MedicalDocument.ClassificationSource.USER_SELECTED
+    return MedicalDocument.ClassificationSource.GUARDIAN_SELECTED
+
+
+def _active_facility(facility_uuid, *, for_update=False):
+    if facility_uuid is None:
+        return None
+    queryset = HealthcareFacility.objects
+    if for_update:
+        queryset = queryset.select_for_update()
+    try:
+        facility = queryset.get(uuid=facility_uuid)
+    except (HealthcareFacility.DoesNotExist, ValueError) as exc:
+        raise HealthcareFacilityNotFound() from exc
+    if not facility.active:
+        raise HealthcareFacilityInactive()
+    return facility
+
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +93,9 @@ def create_medical_document(*, patient, actor, upload, metadata, scanner=None):
 
     scan_result = (scanner or default_file_security_scanner).scan(validated.content)
     values = {key: metadata[key] for key in EDITABLE_METADATA_FIELDS if key in metadata}
+    if "document_date" in metadata:
+        values["document_date"] = metadata["document_date"]
+    values["classification_source"] = _classification_source(patient, actor)
     if values.get("document_date") is not None:
         values.update(
             date_source=MedicalDocument.DateSource.USER_ENTERED,
@@ -86,6 +115,9 @@ def create_medical_document(*, patient, actor, upload, metadata, scanner=None):
     persisted_name = ""
     try:
         with transaction.atomic():
+            facility = _active_facility(
+                metadata.get("healthcare_facility_id"), for_update=True
+            )
             stored.file.save(
                 storage_name,
                 ContentFile(validated.content),
@@ -108,6 +140,7 @@ def create_medical_document(*, patient, actor, upload, metadata, scanner=None):
                     if is_pdf
                     else MedicalDocument.ProcessingStatus.UPLOADED
                 ),
+                healthcare_facility=facility,
                 **values,
             )
             _record_event(
@@ -195,29 +228,71 @@ def update_medical_document(*, document, actor, metadata):
         except MedicalDocument.DoesNotExist as exc:
             raise MedicalDocumentNotFound() from exc
         changed_fields = []
+        events = []
+        old_type = locked.document_type
         for field in EDITABLE_METADATA_FIELDS:
-            if field in metadata:
+            if field in metadata and getattr(locked, field) != metadata[field]:
                 setattr(locked, field, metadata[field])
                 changed_fields.append(field)
-        if "document_date" in metadata:
-            if metadata["document_date"] is None:
-                locked.date_source = ""
-                locked.date_verified = False
-                locked.date_verified_at = None
-            else:
-                locked.date_source = MedicalDocument.DateSource.USER_CORRECTED
-                locked.date_verified = True
-                locked.date_verified_at = timezone.now()
-            changed_fields.extend(("date_source", "date_verified", "date_verified_at"))
+        if "document_type" in changed_fields:
+            locked.classification_source = _classification_source(locked.patient, actor)
+            changed_fields.append("classification_source")
+            events.append(
+                (
+                    MedicalDocumentEvent.EventType.DOCUMENT_TYPE_CHANGED,
+                    {
+                        "old_type": old_type,
+                        "new_type": locked.document_type,
+                        "classification_source": locked.classification_source,
+                    },
+                )
+            )
+        if "healthcare_facility_id" in metadata:
+            facility = _active_facility(
+                metadata["healthcare_facility_id"], for_update=True
+            )
+            if locked.healthcare_facility_id != (facility.pk if facility else None):
+                old_facility_id = locked.healthcare_facility_id
+                locked.healthcare_facility = facility
+                changed_fields.append("healthcare_facility")
+                events.append(
+                    (
+                        MedicalDocumentEvent.EventType.DOCUMENT_FACILITY_CHANGED,
+                        {
+                            "old_facility_id": str(old_facility_id)
+                            if old_facility_id
+                            else None,
+                            "new_facility_id": str(facility.pk) if facility else None,
+                        },
+                    )
+                )
+        event_fields = {
+            MedicalDocumentEvent.EventType.DOCUMENT_LOCATION_UPDATED: {
+                "facility_name",
+                "location_text",
+            },
+            MedicalDocumentEvent.EventType.DOCUMENT_DEPARTMENT_UPDATED: {"department"},
+            MedicalDocumentEvent.EventType.DOCUMENT_PHYSICIAN_METADATA_UPDATED: {
+                "physician_name"
+            },
+        }
+        for event_type, fields in event_fields.items():
+            present = sorted(fields.intersection(changed_fields))
+            if present:
+                events.append((event_type, {"fields": present}))
         if not changed_fields:
             return locked
         locked.save(update_fields=(*changed_fields, "updated_at"))
-        _record_event(
-            locked,
-            MedicalDocumentEvent.EventType.METADATA_UPDATED,
-            actor,
-            {"fields": sorted(set(changed_fields))},
-        )
+        generic = sorted({"title", "description"}.intersection(changed_fields))
+        if generic:
+            events.append(
+                (
+                    MedicalDocumentEvent.EventType.METADATA_UPDATED,
+                    {"fields": generic},
+                )
+            )
+        for event_type, event_metadata in events:
+            _record_event(locked, event_type, actor, event_metadata)
     return locked
 
 
