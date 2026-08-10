@@ -1,0 +1,40 @@
+# PMDAP OCR-capable Celery worker image (Railway worker service).
+#
+# Standalone worker image: base dependencies + PaddleOCR/PaddlePaddle CPU +
+# preloaded OCR models. No web server, no entrypoint CMD — Railway runs the
+# worker via its configured start command (celery -A config worker ...).
+FROM python:3.12-slim AS worker
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+RUN addgroup --system app && adduser --system --ingroup app app
+
+COPY requirements/base.txt requirements/base.txt
+COPY requirements/ocr.txt requirements/ocr.txt
+
+RUN python -m pip install --upgrade pip && \
+    python -m pip install -r requirements/base.txt && \
+    python -m pip install -r requirements/ocr.txt
+
+RUN apt-get update && \
+    apt-get install --yes --no-install-recommends \
+        libgl1 \
+        libglib2.0-0 \
+        libgomp1 && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --chown=app:app . .
+
+ENV PADDLE_PDX_CACHE_HOME=/opt/paddle-cache \
+    PADDLE_PDX_MODEL_SOURCE=BOS \
+    PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=1
+
+RUN mkdir -p /opt/paddle-cache && \
+    python docker/preload_ocr_models.py && \
+    chown -R app:app /opt/paddle-cache
+
+USER app

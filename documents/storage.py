@@ -5,15 +5,43 @@ from django.core.files.storage import FileSystemStorage
 from django.utils.deconstruct import deconstructible
 
 
-@deconstructible
-class PrivateMedicalStorage(FileSystemStorage):
-    @property
-    def base_location(self):
-        return str(settings.MEDICAL_FILE_ROOT)
+def _storage_backend() -> str:
+    return os.getenv("STORAGE_BACKEND", "local").strip().lower()
 
-    @property
-    def location(self):
-        return os.path.abspath(self.base_location)
+
+if _storage_backend() == "s3":
+    from storages.backends.s3boto3 import S3Boto3Storage as _StorageBase
+
+    _S3 = True
+else:
+    _StorageBase = FileSystemStorage
+    _S3 = False
+
+
+@deconstructible
+class PrivateMedicalStorage(_StorageBase):
+    """Private medical file storage.
+
+    Local backend stores under ``MEDICAL_FILE_ROOT``. S3 backend stores under
+    the ``medical`` key prefix in the configured bucket. Both backends keep
+    files private: no public base URL and ``url()`` always raises.
+    """
+
+    if _S3:
+        location = "medical"
+        default_acl = "private"
+        file_overwrite = False
+        querystring_auth = False
+        custom_domain = None
+    else:
+
+        @property
+        def base_location(self):
+            return str(settings.MEDICAL_FILE_ROOT)
+
+        @property
+        def location(self):
+            return os.path.abspath(self.base_location)
 
     @property
     def base_url(self):

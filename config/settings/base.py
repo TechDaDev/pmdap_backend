@@ -97,6 +97,20 @@ CACHES = {
     }
 }
 
+# Private file storage backend. Development/tests use the local filesystem;
+# production uses the S3-compatible Railway bucket while keeping files private
+# (no public URLs, authenticated streaming only).
+STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "local").strip().lower()
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID", "")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "")
+AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME", "")
+AWS_S3_ENDPOINT_URL = os.getenv("AWS_S3_ENDPOINT_URL", "")
+AWS_S3_REGION_NAME = os.getenv("AWS_S3_REGION_NAME", "") or None
+AWS_S3_ADDRESSING_STYLE = os.getenv("AWS_S3_ADDRESSING_STYLE", "virtual")
+AWS_S3_FILE_OVERWRITE = False
+AWS_DEFAULT_ACL = None
+AWS_QUERYSTRING_AUTH = False
+
 PASSWORD_VALIDATION_MODULE = "django.contrib.auth.password_validation"
 
 AUTH_PASSWORD_VALIDATORS = [

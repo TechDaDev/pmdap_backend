@@ -23,8 +23,6 @@ EXPOSE 8000
 
 CMD ["sh", "docker/entrypoint.sh"]
 
-FROM runtime-base AS web
-
 FROM runtime-base AS ocr-worker
 
 USER root
@@ -48,3 +46,7 @@ RUN mkdir -p /opt/paddle-cache && \
 ENV PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=1
 
 USER app
+
+# Keep the web stage last so Railway's Dockerfile builder produces the lean
+# web runtime image for the backend service (no OCR/Paddle dependencies).
+FROM runtime-base AS web

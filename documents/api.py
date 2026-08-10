@@ -14,6 +14,12 @@ from documents.exceptions import (
     MedicalFileUnavailable,
 )
 from documents.models import MedicalDocument, StoredFile
+
+try:
+    from botocore.exceptions import ClientError as _S3ClientError
+except ImportError:  # pragma: no cover - S3 client is optional in minimal installs
+    _S3ClientError = OSError
+
 from documents.serializers import (
     DateCandidateSerializer,
     DocumentDateConfirmationResponseSerializer,
@@ -91,7 +97,7 @@ def stream_document(document):
         raise MedicalFileUnavailable()
     try:
         original = document.stored_file.file.open("rb")
-    except OSError as exc:
+    except (OSError, _S3ClientError) as exc:
         raise MedicalFileStorageFailed() from exc
     response = FileResponse(
         original,

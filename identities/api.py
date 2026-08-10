@@ -8,8 +8,18 @@ from rest_framework.views import APIView
 
 from accounts.models import User
 from accounts.serializers import ErrorEnvelopeSerializer
-from identities.exceptions import IdentityDocumentNotFound, VerificationAgentRequired
+from identities.exceptions import (
+    IdentityDocumentNotFound,
+    IdentityFileStorageFailed,
+    VerificationAgentRequired,
+)
 from identities.models import IdentityDocument
+
+try:
+    from botocore.exceptions import ClientError as _S3ClientError
+except ImportError:  # pragma: no cover - S3 client is optional in minimal installs
+    _S3ClientError = OSError
+
 from identities.serializers import (
     EmptySerializer,
     IdentityDocumentDetailSerializer,
@@ -232,7 +242,10 @@ class IdentityDocumentImageView(APIView):
         identity_file = document.front_image if side == "front" else document.back_image
         if side not in {"front", "back"} or identity_file is None:
             raise IdentityDocumentNotFound()
-        handle = identity_file.file.open("rb")
+        try:
+            handle = identity_file.file.open("rb")
+        except (OSError, _S3ClientError) as exc:
+            raise IdentityFileStorageFailed() from exc
         extension = ".png" if identity_file.media_type == "image/png" else ".jpg"
         return FileResponse(
             handle,

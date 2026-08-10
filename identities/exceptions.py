@@ -21,3 +21,9 @@ class IdentityTransitionConflict(APIException):
     status_code = 409
     default_detail = "Identity document cannot make that transition."
     default_code = "identity_transition_conflict"
+
+
+class IdentityFileStorageFailed(APIException):
+    status_code = 503
+    default_detail = "Identity file storage is temporarily unavailable."
+    default_code = "identity_file_storage_failed"
