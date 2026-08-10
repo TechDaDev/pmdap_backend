@@ -11,6 +11,10 @@ if not ALLOWED_HOSTS:
 DEBUG = False
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_SSL_REDIRECT = True
+# Railway's startup healthcheck probes over plain HTTP using the
+# healthcheck.railway.app hostname. Keep HTTPS redirects for real traffic but
+# exempt the healthcheck host so it can return a 200 liveness response.
+SECURE_REDIRECT_EXEMPT = env_list("DJANGO_SECURE_REDIRECT_EXEMPT")  # noqa: F405
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
 SECURE_HSTS_SECONDS = 31_536_000
