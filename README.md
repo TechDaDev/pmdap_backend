@@ -5,11 +5,15 @@ Django REST Framework, PostgreSQL, Redis, Celery, and versioned REST APIs.
 
 ## Delivery status
 
-M0-M8 are accepted. M9 multilingual date detection is the active phase.
+M0–M16.1 are accepted. M17 is the final Phase-1 stabilization phase: the
+`/api/v1/` contract is frozen and the backend is classified **PHASE1_RC_READY**
+(application/API contract stable; documented deployment blockers remain).
 
 ## Authoritative documents
 
 - [Phase 1 scope](docs/specification/phase-1-scope.md)
+- [Phase-1 API contract (frozen)](docs/api/phase-1-api-contract.md)
+- [Phase-1 release candidate / readiness](docs/release/phase-1-release-candidate.md)
 - [M0 foundation design](docs/superpowers/specs/2026-08-08-m0-project-foundation-design.md)
 - [M3 identity-document design](docs/superpowers/specs/2026-08-08-m3-identity-documents-design.md)
 - [M4 minor/guardian design](docs/superpowers/specs/2026-08-08-m4-minors-guardians-design.md)
@@ -135,3 +139,21 @@ Stop services without deleting persistent data:
 ```bash
 docker compose down
 ```
+
+## Phase-1 release candidate (M17)
+
+- Classification: **PHASE1_RC_READY** — application/API contract stable;
+  documented deployment blockers remain. Not `PRODUCTION_READY`.
+- Frozen API contract: see [docs/api/phase-1-api-contract.md](docs/api/phase-1-api-contract.md).
+- Readiness checklist and blockers: see
+  [docs/release/phase-1-release-candidate.md](docs/release/phase-1-release-candidate.md).
+- Known deployment blockers: PyMuPDF licensing, malware scanning
+  (`NOT_CONFIGURED`), production private object storage, backup/PITR, audit
+  retention/legal policy, and real-Arabic OCR validation.
+
+OpenAPI:
+
+- Schema: `GET /api/v1/schema/`
+- Swagger UI: `GET /api/v1/docs/`
+- Health: `GET /api/v1/health/`
+
