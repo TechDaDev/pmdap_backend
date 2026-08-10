@@ -215,7 +215,23 @@ class AccountClaimMoreInformationView(AccountClaimDecisionView):
 class AccountClaimEvidenceImageView(APIView):
     @extend_schema(
         operation_id="account_claim_evidence_image_retrieve",
-        responses={(200, "image/jpeg"): bytes, (200, "image/png"): bytes},
+        parameters=[
+            OpenApiParameter(
+                name="side",
+                type=str,
+                location=OpenApiParameter.PATH,
+                required=True,
+                enum=["front", "back"],
+                description="Which evidence image to stream: front or back.",
+            )
+        ],
+        responses={
+            (200, "image/jpeg"): bytes,
+            (200, "image/png"): bytes,
+            401: ErrorEnvelopeSerializer,
+            403: ErrorEnvelopeSerializer,
+            404: ErrorEnvelopeSerializer,
+        },
         tags=["Account claim verification"],
     )
     def get(self, request, claim_uuid, evidence_uuid, side):

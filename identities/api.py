@@ -205,6 +205,16 @@ class IdentityDocumentReplaceView(APIView):
 class IdentityDocumentImageView(APIView):
     @extend_schema(
         operation_id="identity_document_image_retrieve",
+        parameters=[
+            OpenApiParameter(
+                name="side",
+                type=str,
+                location=OpenApiParameter.PATH,
+                required=True,
+                enum=["front", "back"],
+                description="Which identity image to stream: front or back.",
+            )
+        ],
         responses={
             (200, "image/jpeg"): bytes,
             (200, "image/png"): bytes,
