@@ -16,6 +16,62 @@ class RejectUnknownFieldsMixin:
         return super().to_internal_value(data)
 
 
+class IdentityExtractionRequestSerializer(RejectUnknownFieldsMixin, serializers.Serializer):
+    """Advisory extraction request. No IdentityDocument is created."""
+
+    EXTRACTABLE_TYPES = (
+        IdentityDocument.DocumentType.UNIFIED_NATIONAL_CARD,
+        IdentityDocument.DocumentType.PASSPORT,
+    )
+
+    document_type = serializers.ChoiceField(choices=EXTRACTABLE_TYPES)
+    front_image = serializers.ImageField()
+    back_image = serializers.ImageField(required=False, allow_null=True)
+
+    def validate_front_image(self, value):
+        try:
+            inspect_identity_upload(value)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.messages) from exc
+        return value
+
+    def validate_back_image(self, value):
+        return self.validate_front_image(value)
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        if (
+            attrs["document_type"] == IdentityDocument.DocumentType.UNIFIED_NATIONAL_CARD
+            and not attrs.get("back_image")
+        ):
+            raise serializers.ValidationError(
+                {"back_image": ["A back image is required for a National Card."]}
+            )
+        return attrs
+
+
+class ExtractedIdentityFieldSerializer(serializers.Serializer):
+    value = serializers.CharField(allow_null=True, required=False)
+    confidence = serializers.FloatField(min_value=0.0, max_value=1.0)
+    source = serializers.ChoiceField(
+        choices=("MRZ", "OCR", "DOCUMENT_TYPE", "DERIVED")
+    )
+
+
+class MrzValidationSerializer(serializers.Serializer):
+    detected = serializers.BooleanField()
+    valid = serializers.BooleanField()
+    checks_passed = serializers.BooleanField()
+
+
+class IdentityExtractionResponseSerializer(serializers.Serializer):
+    document_type = serializers.CharField()
+    extractor_version = serializers.CharField()
+    fields = serializers.DictField(child=ExtractedIdentityFieldSerializer())
+    warnings = serializers.ListField(child=serializers.CharField())
+    mrz = MrzValidationSerializer()
+
+
 class IdentityDocumentInputSerializer(RejectUnknownFieldsMixin, serializers.Serializer):
     document_type = serializers.ChoiceField(
         choices=IdentityDocument.DocumentType.choices

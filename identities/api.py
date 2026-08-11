@@ -1,3 +1,6 @@
+import logging
+import os
+import tempfile
 from django.http import FileResponse
 from drf_spectacular.utils import OpenApiParameter, extend_schema, inline_serializer
 from rest_framework import serializers, status
@@ -8,6 +11,7 @@ from rest_framework.views import APIView
 
 from accounts.models import User
 from accounts.serializers import ErrorEnvelopeSerializer
+from identities import extraction
 from identities.exceptions import (
     IdentityDocumentNotFound,
     IdentityFileStorageFailed,
@@ -25,6 +29,8 @@ from identities.serializers import (
     IdentityDocumentDetailSerializer,
     IdentityDocumentInputSerializer,
     IdentityDocumentSummarySerializer,
+    IdentityExtractionRequestSerializer,
+    IdentityExtractionResponseSerializer,
     RejectionSerializer,
     VerificationDetailSerializer,
     VerificationQueueFilterSerializer,
@@ -35,7 +41,11 @@ from identities.services import (
     reject_identity_document,
     submit_identity_document,
 )
-from patients.api import owned_profile
+from patients.api import owned_profile, require_patient
+
+logger = logging.getLogger(__name__)
+
+EXTRACTOR_VERSION = "identity-v1"
 
 
 def envelope(name, child):
@@ -357,3 +367,91 @@ class VerificationRejectView(APIView):
             reason=serializer.validated_data["rejection_reason"],
         )
         return Response({"data": VerificationDetailSerializer(document).data})
+
+
+def _write_upload(upload, path: str) -> None:
+    with open(path, "wb") as out:
+        for chunk in upload.chunks():
+            out.write(chunk)
+
+
+def _safe_ext(name: str) -> str:
+    lower = (name or "").lower()
+    if lower.endswith(".png"):
+        return ".png"
+    if lower.endswith(".jpeg") or lower.endswith(".jpg"):
+        return ".jpg"
+    if lower.endswith(".webp"):
+        return ".webp"
+    return ".jpg"
+
+
+def _confidence_bucket(conf: float) -> str:
+    if conf >= 0.90:
+        return "high"
+    if conf >= 0.70:
+        return "medium"
+    return "low"
+
+
+class IdentityExtractionView(APIView):
+    """Advisory identity extraction (no IdentityDocument is created, no raw OCR
+    text is returned or logged). Requires an authenticated PATIENT."""
+
+    parser_classes = [MultiPartParser, FormParser]
+    serializer_class = IdentityExtractionRequestSerializer
+
+    @extend_schema(
+        operation_id="identity_document_extract",
+        request=IdentityExtractionRequestSerializer,
+        responses={
+            200: envelope("IdentityExtraction", IdentityExtractionResponseSerializer),
+            400: ErrorEnvelopeSerializer,
+            401: ErrorEnvelopeSerializer,
+            403: ErrorEnvelopeSerializer,
+        },
+        tags=["Identity documents"],
+    )
+    def post(self, request):
+        require_patient(request.user)
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        document_type = serializer.validated_data["document_type"]
+        with tempfile.TemporaryDirectory(prefix="pmdap_extract_") as tmp:
+            front = serializer.validated_data["front_image"]
+            front_path = os.path.join(tmp, "front" + _safe_ext(front.name))
+            _write_upload(front, front_path)
+            back = serializer.validated_data.get("back_image")
+            back_path = None
+            if back:
+                back_path = os.path.join(tmp, "back" + _safe_ext(back.name))
+                _write_upload(back, back_path)
+
+            lines = extraction.ocr_text(front_path)
+            if back_path:
+                lines.extend(extraction.ocr_text(back_path))
+            fields, warnings, mrz_summary = extraction.extract_identity(
+                document_type, lines
+            )
+
+        # Safe log: endpoint, type, status, field names + confidence buckets.
+        # NEVER log values / raw OCR / image bytes.
+        bucket_summary = {name: _confidence_bucket(f["confidence"]) for name, f in fields.items()}
+        logger.info(
+            "POST /identity-documents/extract/ type=%s ok fields=%s mrz=%s",
+            document_type,
+            bucket_summary,
+            mrz_summary.get("detected"),
+        )
+        return Response(
+            {
+                "data": {
+                    "document_type": document_type,
+                    "extractor_version": EXTRACTOR_VERSION,
+                    "fields": fields,
+                    "warnings": warnings,
+                    "mrz": mrz_summary,
+                }
+            }
+        )

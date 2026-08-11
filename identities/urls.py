@@ -5,10 +5,16 @@ from identities.api import (
     IdentityDocumentDetailView,
     IdentityDocumentImageView,
     IdentityDocumentReplaceView,
+    IdentityExtractionView,
 )
 
 urlpatterns = [
     path("", IdentityDocumentCollectionView.as_view(), name="identity-document-list"),
+    path(
+        "extract/",
+        IdentityExtractionView.as_view(),
+        name="identity-document-extract",
+    ),
     path(
         "<uuid:document_uuid>/",
         IdentityDocumentDetailView.as_view(),
