@@ -1,17 +1,27 @@
+import mimetypes
+
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError
+from django.http import FileResponse
 from drf_spectacular.utils import extend_schema, inline_serializer
 from rest_framework import status
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.serializers import ErrorEnvelopeSerializer
 from patients.exceptions import (
+    PatientAvatarUnavailable,
     PatientProfileExists,
     PatientProfileNotFound,
     PatientRoleRequired,
 )
 from patients.models import PatientProfile
+
+try:
+    from botocore.exceptions import ClientError as _S3ClientError
+except ImportError:  # pragma: no cover - S3 client is optional in minimal installs
+    _S3ClientError = OSError
 from patients.serializers import (
     PatientProfileInputSerializer,
     PatientProfileSerializer,
@@ -41,6 +51,8 @@ def owned_profile(user):
 
 
 class PatientMeView(APIView):
+    parser_classes = (JSONParser, MultiPartParser, FormParser)
+
     @extend_schema(
         responses={
             200: profile_envelope("PatientProfileSuccess"),
@@ -103,3 +115,32 @@ class PatientMeView(APIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response({"data": PatientProfileSerializer(profile).data})
+
+
+class PatientAvatarView(APIView):
+    @extend_schema(
+        responses={
+            200: bytes,
+            401: ErrorEnvelopeSerializer,
+            403: ErrorEnvelopeSerializer,
+            404: ErrorEnvelopeSerializer,
+            503: ErrorEnvelopeSerializer,
+        },
+        tags=["Patients"],
+    )
+    def get(self, request):
+        profile = owned_profile(request.user)
+        if not profile.avatar:
+            raise PatientProfileNotFound()
+        try:
+            handle = profile.avatar.open("rb")
+        except (OSError, _S3ClientError) as exc:
+            raise PatientAvatarUnavailable() from exc
+        content_type = (
+            mimetypes.guess_type(profile.avatar.name)[0] or "application/octet-stream"
+        )
+        return FileResponse(
+            handle,
+            content_type=content_type,
+            as_attachment=False,
+        )

@@ -5,6 +5,7 @@ from django.db import models
 from django.utils import timezone
 
 from common.models import UUIDModel
+from patients.storage import private_avatar_storage
 
 
 def validate_not_future(value):
@@ -62,6 +63,12 @@ class PatientProfile(UUIDModel):
         max_length=24,
         choices=IdentityStatus,
         default=IdentityStatus.UNVERIFIED,
+    )
+    avatar = models.ImageField(
+        storage=private_avatar_storage,
+        upload_to="",
+        null=True,
+        blank=True,
     )
 
     def age_on(self, today):

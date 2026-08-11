@@ -16,3 +16,9 @@ class PatientProfileExists(APIException):
     status_code = 409
     default_detail = "Patient profile already exists."
     default_code = "patient_profile_exists"
+
+
+class PatientAvatarUnavailable(APIException):
+    status_code = 503
+    default_detail = "Patient avatar storage is temporarily unavailable."
+    default_code = "patient_avatar_unavailable"

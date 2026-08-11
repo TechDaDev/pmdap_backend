@@ -139,6 +139,9 @@ IDENTITY_FILE_MAX_BYTES = int(os.getenv("IDENTITY_FILE_MAX_BYTES", 10 * 1024 * 1
 MEDICAL_FILE_ROOT = Path(
     os.getenv("MEDICAL_FILE_ROOT", BASE_DIR / "private" / "medical")
 )
+AVATAR_FILE_ROOT = Path(
+    os.getenv("AVATAR_FILE_ROOT", BASE_DIR / "private" / "avatar")
+)
 MEDICAL_FILE_MAX_BYTES = int(os.getenv("MEDICAL_FILE_MAX_BYTES", 25 * 1024 * 1024))
 MEDICAL_IMAGE_MAX_PIXELS = int(os.getenv("MEDICAL_IMAGE_MAX_PIXELS", 40_000_000))
 PDF_TEXT_MIN_CHARS = int(os.getenv("PDF_TEXT_MIN_CHARS", "80"))

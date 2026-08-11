@@ -1,12 +1,15 @@
 import re
 import uuid
 from datetime import date, timedelta
+from io import BytesIO
 from unittest.mock import Mock, patch
 
 import pytest
 from django.apps import apps
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError
+from PIL import Image
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from tests.factories import UserFactory
@@ -32,6 +35,7 @@ PROFILE_FIELDS = {
     "nationality",
     "blood_group",
     "identity_status",
+    "avatar_url",
     "created_at",
     "updated_at",
 }
@@ -554,6 +558,72 @@ def test_age_and_minor_boundaries(dob, today, expected_age, expected_minor):
     with patch("patients.models.timezone.localdate", return_value=today):
         assert profile.age == expected_age
         assert profile.is_minor is expected_minor
+
+
+def avatar_upload(name="avatar.png"):
+    stream = BytesIO()
+    Image.new("RGB", (8, 8), color=(70, 120, 180)).save(stream, format="PNG")
+    return SimpleUploadedFile(name, stream.getvalue(), content_type="image/png")
+
+
+def avatar_patient(api_client):
+    from patients.services import create_patient_profile
+
+    user = UserFactory(status="ACTIVE")
+    create_patient_profile(user=user, **PROFILE_INPUT)
+    auth(api_client, user)
+    return user
+
+
+@pytest.mark.django_db
+def test_avatar_url_null_when_unset(api_client):
+    avatar_patient(api_client)
+
+    response = api_client.get(PATIENT_ME)
+
+    assert response.status_code == 200
+    assert response.json()["data"]["avatar_url"] is None
+
+
+@pytest.mark.django_db
+def test_avatar_upload_via_patch(api_client):
+    avatar_patient(api_client)
+
+    response = api_client.patch(
+        PATIENT_ME, {"avatar": avatar_upload()}, format="multipart"
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["avatar_url"] == f"{PATIENT_ME}avatar/"
+    assert data["full_name"] == PROFILE_INPUT["full_name"]
+    profile = patient_model().objects.get()
+    assert profile.avatar
+    assert profile.avatar.name
+
+
+@pytest.mark.django_db
+def test_avatar_serve_returns_private_bytes(api_client):
+    avatar_patient(api_client)
+    api_client.patch(PATIENT_ME, {"avatar": avatar_upload()}, format="multipart")
+
+    response = api_client.get(f"{PATIENT_ME}avatar/")
+
+    assert response.status_code == 200
+    assert response["Content-Type"].startswith("image/")
+    assert b"".join(response.streaming_content)[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+@pytest.mark.django_db
+def test_avatar_serve_without_avatar_returns_404(api_client):
+    avatar_patient(api_client)
+
+    assert api_client.get(f"{PATIENT_ME}avatar/").status_code == 404
+
+
+@pytest.mark.django_db
+def test_avatar_requires_authentication(api_client):
+    assert api_client.get(f"{PATIENT_ME}avatar/").status_code == 401
 
 
 @pytest.mark.django_db

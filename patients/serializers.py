@@ -22,10 +22,18 @@ class PatientProfileInputSerializer(
     RejectUnknownFieldsMixin, serializers.ModelSerializer
 ):
     nationality = serializers.CharField(min_length=2, max_length=2)
+    avatar = serializers.ImageField(required=False, allow_null=True)
 
     class Meta:
         model = PatientProfile
-        fields = ("full_name", "date_of_birth", "sex", "nationality", "blood_group")
+        fields = (
+            "full_name",
+            "date_of_birth",
+            "sex",
+            "nationality",
+            "blood_group",
+            "avatar",
+        )
 
     def validate_date_of_birth(self, value):
         today = timezone.localdate()
@@ -51,10 +59,18 @@ class PatientProfileUpdateSerializer(
     RejectUnknownFieldsMixin, serializers.ModelSerializer
 ):
     nationality = serializers.CharField(required=False, min_length=2, max_length=2)
+    avatar = serializers.ImageField(required=False, allow_null=True)
 
     class Meta:
         model = PatientProfile
-        fields = ("full_name", "date_of_birth", "sex", "nationality", "blood_group")
+        fields = (
+            "full_name",
+            "date_of_birth",
+            "sex",
+            "nationality",
+            "blood_group",
+            "avatar",
+        )
         extra_kwargs = {field: {"required": False} for field in fields}
 
     def validate_date_of_birth(self, value):
@@ -80,6 +96,7 @@ class PatientProfileUpdateSerializer(
 class PatientProfileSerializer(serializers.ModelSerializer):
     age = serializers.IntegerField(read_only=True)
     is_minor = serializers.BooleanField(read_only=True)
+    avatar_url = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = PatientProfile
@@ -94,7 +111,13 @@ class PatientProfileSerializer(serializers.ModelSerializer):
             "nationality",
             "blood_group",
             "identity_status",
+            "avatar_url",
             "created_at",
             "updated_at",
         )
         read_only_fields = fields
+
+    def get_avatar_url(self, obj) -> str | None:
+        if not obj.avatar:
+            return None
+        return "/api/v1/patients/me/avatar/"
