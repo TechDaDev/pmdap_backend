@@ -14,8 +14,8 @@ RUN python -m pip install --upgrade pip && \
 
 COPY --chown=app:app . .
 
-RUN mkdir -p /var/lib/pmdap/identity /var/lib/pmdap/medical && \
-    chown app:app /var/lib/pmdap/identity /var/lib/pmdap/medical
+RUN mkdir -p /var/lib/pmdap/identity /var/lib/pmdap/medical /app/staticfiles && \
+    chown app:app /var/lib/pmdap/identity /var/lib/pmdap/medical /app/staticfiles
 
 USER app
 
