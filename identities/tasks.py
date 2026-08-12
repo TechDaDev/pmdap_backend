@@ -8,6 +8,7 @@ import logging
 
 from celery import shared_task
 from django.conf import settings
+from django.db import transaction
 from PIL import Image
 
 from identities import extraction
@@ -67,13 +68,19 @@ def _finish(job, *, status, error_code="", payload=None):
     time_limit=settings.OCR_TASK_TIME_LIMIT,
 )
 def extract_identity_document(self, job_uuid):
-    try:
-        job = IdentityExtractionJob.objects.select_for_update().get(pk=job_uuid)
-    except IdentityExtractionJob.DoesNotExist:
-        return None
-
-    job.status = IdentityExtractionJob.Status.PROCESSING
-    job.save(update_fields=["status", "updated_at"])
+    # Claim the job inside a short transaction; OCR runs outside it so the row
+    # lock / DB connection are not held for the whole inference.
+    with transaction.atomic():
+        try:
+            job = IdentityExtractionJob.objects.select_for_update().get(
+                pk=job_uuid
+            )
+        except IdentityExtractionJob.DoesNotExist:
+            return None
+        if job.status != IdentityExtractionJob.Status.PENDING:
+            return None
+        job.status = IdentityExtractionJob.Status.PROCESSING
+        job.save(update_fields=["status", "updated_at"])
 
     keys = _staging_keys(job)
     lines = []
