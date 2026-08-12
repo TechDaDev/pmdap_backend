@@ -136,4 +136,12 @@ def extract_identity_document(self, job_uuid):
         status=IdentityExtractionJob.Status.SUCCESS,
         payload=payload,
     )
-    return payload
+    # NEVER return the payload: Celery logs the task return value verbatim,
+    # which would leak extracted identity values into worker logs. Return a
+    # safe summary (field names + confidence buckets only).
+    return {
+        "status": "SUCCESS",
+        "document_type": job.document_type,
+        "fields": bucket_summary,
+        "mrz": mrz_summary.get("detected"),
+    }
