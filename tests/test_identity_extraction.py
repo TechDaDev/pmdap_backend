@@ -19,6 +19,16 @@ from tests.factories import UserFactory
 EXTRACT = "/api/v1/identity-documents/extract/"
 
 
+@pytest.fixture(autouse=True)
+def reset_ocr_engine_cache():
+    """The per-process engine singleton is shared across tests in one process."""
+    from processing.ocr_provider import reset_ocr_engine
+
+    reset_ocr_engine()
+    yield
+    reset_ocr_engine()
+
+
 def synthetic_png(text="SYNTHETIC TEST DOCUMENT 123456789012345"):
     img = Image.new("RGB", (420, 140), "white")
     draw = ImageDraw.Draw(img)
@@ -92,7 +102,7 @@ def test_extract_async_flow_returns_structured_result_without_db_record(
             OCRLine("FAMILY NO: 1234", 0.9),
         )
 
-    monkeypatch.setattr("identities.tasks.PaddleOCREngine", FakeEngine)
+    monkeypatch.setattr("processing.ocr_provider.PaddleOCREngine", FakeEngine)
     user = UserFactory(status="ACTIVE")
     before = IdentityDocument.objects.count()
     _auth(api_client, user)
@@ -146,7 +156,9 @@ def test_extract_ocr_unavailable_degrades_to_failed(api_client, monkeypatch):
     def raise_unavailable(self, *, pipeline=None):
         raise OCREngineUnavailableError("no paddle")
 
-    monkeypatch.setattr("identities.tasks.PaddleOCREngine.__init__", raise_unavailable)
+    monkeypatch.setattr(
+        "processing.ocr_provider.PaddleOCREngine.__init__", raise_unavailable
+    )
     user = UserFactory(status="ACTIVE")
     _auth(api_client, user)
 

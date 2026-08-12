@@ -21,9 +21,9 @@ from processing.ocr import (
     OCRError,
     OCRResult,
     OCRResultSizeError,
-    PaddleOCREngine,
     PDFPageRenderer,
 )
+from processing.ocr_provider import get_ocr_engine
 from processing.services import RetryablePDFProcessingError, _read_verified_content
 
 logger = logging.getLogger(__name__)
@@ -472,7 +472,7 @@ def process_ocr_document(
         if engine is None:
             if settings.OCR_ENGINE != "paddleocr":
                 raise OCREngineUnavailableError("Configured OCR engine is unavailable.")
-            engine = PaddleOCREngine()
+            engine = get_ocr_engine()
         preprocessor = preprocessor or ImagePreprocessor()
         renderer = renderer or PDFPageRenderer()
         results = {}

@@ -4,7 +4,9 @@ Runs inside the OCR worker image where PaddleOCR + preloaded models live.
 Staging images are read from private storage and deleted after processing.
 Extracted values are stored in the cache (TTL); no IdentityDocument is created.
 """
+import io
 import logging
+import time
 from datetime import timedelta
 
 from celery import shared_task
@@ -20,7 +22,8 @@ from identities.extraction_store import (
 )
 from identities.models import IdentityExtractionJob
 from identities.storage import private_identity_storage
-from processing.ocr import OCREngineUnavailableError, PaddleOCREngine
+from processing.ocr import OCREngineUnavailableError
+from processing.ocr_provider import engine_created_count, get_ocr_engine
 
 logger = logging.getLogger(__name__)
 
@@ -84,22 +87,23 @@ def cleanup_identity_extraction_jobs(job_uuid=None):
     """
     if job_uuid is not None:
         try:
-            job = IdentityExtractionJob.objects.select_for_update().get(
-                pk=job_uuid
-            )
+            with transaction.atomic():
+                job = IdentityExtractionJob.objects.select_for_update().get(
+                    pk=job_uuid
+                )
+                if job.status == IdentityExtractionJob.Status.FINALIZED:
+                    return None
+                if (
+                    job.status == IdentityExtractionJob.Status.SUCCESS
+                    and job.updated_at
+                    and (timezone.now() - job.updated_at).total_seconds()
+                    < settings.IDENTITY_STAGING_TTL_SECONDS
+                ):
+                    # Not expired yet (race with an earlier finalize attempt).
+                    return None
+                _expire_job(job)
         except IdentityExtractionJob.DoesNotExist:
             return None
-        if job.status == IdentityExtractionJob.Status.FINALIZED:
-            return None
-        if (
-            job.status == IdentityExtractionJob.Status.SUCCESS
-            and job.updated_at
-            and (timezone.now() - job.updated_at).total_seconds()
-            < settings.IDENTITY_STAGING_TTL_SECONDS
-        ):
-            # Not expired yet (race with an earlier finalize attempt).
-            return None
-        _expire_job(job)
         return None
 
     # Sweep mode: expire any abandoned job older than the staging TTL.
@@ -154,14 +158,34 @@ def extract_identity_document(self, job_uuid):
 
     keys = _staging_keys(job)
     lines = []
+    total_started = time.monotonic()
+    queue_wait_ms = max(
+        0, int((timezone.now() - job.created_at).total_seconds() * 1000)
+    )
+    created_before = engine_created_count()
+    timing = {}
     try:
-        engine = PaddleOCREngine()
-        for key in keys:
+        engine_t = time.monotonic()
+        engine = get_ocr_engine()
+        timing["engine_init_ms"] = int((time.monotonic() - engine_t) * 1000)
+        sides = [("front", keys[0])] if keys else []
+        if len(keys) > 1:
+            sides.append(("back", keys[1]))
+        for side, key in sides:
+            t = time.monotonic()
             with private_identity_storage.open(key, "rb") as handle:
-                image = Image.open(handle)
-                image.load()
+                content = handle.read()
+            timing[f"{side}_storage_read_ms"] = int(
+                (time.monotonic() - t) * 1000
+            )
+            t = time.monotonic()
+            image = Image.open(io.BytesIO(content))
+            image.load()
+            timing[f"{side}_decode_ms"] = int((time.monotonic() - t) * 1000)
             try:
+                t = time.monotonic()
                 result = engine.extract_image(image)
+                timing[f"{side}_ocr_ms"] = int((time.monotonic() - t) * 1000)
                 lines.extend(line.text for line in result.lines)
             finally:
                 image.close()
@@ -185,9 +209,12 @@ def extract_identity_document(self, job_uuid):
         )
         return None
 
+    t = time.monotonic()
     fields, warnings, mrz_summary = extraction.extract_identity(
         job.document_type, lines
     )
+    parse_ms = int((time.monotonic() - t) * 1000)
+    total_ms = int((time.monotonic() - total_started) * 1000)
     payload = {
         "document_type": job.document_type,
         "extractor_version": extraction.EXTRACTOR_VERSION,
@@ -196,15 +223,32 @@ def extract_identity_document(self, job_uuid):
         "mrz": mrz_summary,
     }
 
-    # Safe log: endpoint, type, status, field names + confidence buckets only.
+    # Safe log: job, type, status, timings, line count, field names +
+    # confidence buckets only. NEVER text, identity values or storage keys.
     bucket_summary = {
         name: extraction.confidence_bucket(f["confidence"])
         for name, f in fields.items()
     }
     logger.info(
-        "identity extraction job=%s type=%s ok fields=%s mrz=%s",
+        "identity extraction job=%s type=%s status=ok "
+        "queue_wait_ms=%s engine_init_ms=%s engine_reused=%s "
+        "front_storage_read_ms=%s front_decode_ms=%s front_ocr_ms=%s "
+        "back_storage_read_ms=%s back_decode_ms=%s back_ocr_ms=%s "
+        "parse_ms=%s total_ms=%s line_count=%s fields=%s mrz=%s",
         job_uuid,
         job.document_type,
+        queue_wait_ms,
+        timing.get("engine_init_ms"),
+        created_before > 0,
+        timing.get("front_storage_read_ms"),
+        timing.get("front_decode_ms"),
+        timing.get("front_ocr_ms"),
+        timing.get("back_storage_read_ms"),
+        timing.get("back_decode_ms"),
+        timing.get("back_ocr_ms"),
+        parse_ms,
+        total_ms,
+        len(lines),
         bucket_summary,
         mrz_summary.get("detected"),
     )
