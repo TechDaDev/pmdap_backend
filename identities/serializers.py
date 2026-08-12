@@ -86,8 +86,9 @@ class IdentityDocumentInputSerializer(RejectUnknownFieldsMixin, serializers.Seri
     issuing_country = serializers.RegexField(r"^[A-Za-z]{2}$", required=False)
     issue_date = serializers.DateField(required=False, allow_null=True)
     expiry_date = serializers.DateField(required=False, allow_null=True)
-    front_image = serializers.FileField()
+    front_image = serializers.FileField(required=False, allow_null=True)
     back_image = serializers.FileField(required=False, allow_null=True)
+    extraction_job_id = serializers.UUIDField(required=False, allow_null=True)
 
     def validate_issuing_country(self, value):
         return value.upper()
@@ -109,15 +110,33 @@ class IdentityDocumentInputSerializer(RejectUnknownFieldsMixin, serializers.Seri
         attrs = super().validate(attrs)
         errors = {}
         document_type = attrs["document_type"]
+        job_id = attrs.get("extraction_job_id")
+        has_job = bool(job_id)
+        has_images = attrs.get("front_image") is not None or (
+            attrs.get("back_image") is not None
+        )
+
+        if has_job and has_images:
+            errors["extraction_job_id"] = [
+                "Use either extraction_job_id or image files, not both."
+            ]
+            raise serializers.ValidationError(errors)
+        if not has_job and attrs.get("front_image") is None:
+            errors["front_image"] = [
+                "This field is required when not using an extraction job."
+            ]
+
         if document_type == IdentityDocument.DocumentType.UNIFIED_NATIONAL_CARD:
             if "issuing_country" not in attrs:
                 attrs["issuing_country"] = "IQ"
-            required_fields = ["national_number", "back_image"]
+            required_fields = ["national_number"]
             if not self.context.get("minor_creation"):
                 required_fields.append("family_number")
             for field in required_fields:
                 if not attrs.get(field):
                     errors[field] = ["This field is required for a National Card."]
+            if not has_job and not attrs.get("back_image"):
+                errors["back_image"] = ["This field is required for a National Card."]
             if attrs["issuing_country"] != "IQ":
                 errors["issuing_country"] = [
                     "Unified National Card must be issued by Iraq."

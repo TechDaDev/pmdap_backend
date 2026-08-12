@@ -183,6 +183,14 @@ OCR_TASK_MAX_RETRIES = int(os.getenv("OCR_TASK_MAX_RETRIES", "3"))
 OCR_TASK_RETRY_BASE_SECONDS = int(os.getenv("OCR_TASK_RETRY_BASE_SECONDS", "10"))
 OCR_TASK_SOFT_TIME_LIMIT = int(os.getenv("OCR_TASK_SOFT_TIME_LIMIT", str(25 * 60)))
 OCR_TASK_TIME_LIMIT = int(os.getenv("OCR_TASK_TIME_LIMIT", str(30 * 60)))
+
+# Identity extraction staging lifetime. A SUCCESSFUL extraction job keeps its
+# private staging images until the client finalizes (submit/replace) or this
+# TTL elapses, whichever comes first. The worker schedules a delayed
+# cleanup_identity_extraction_jobs task at countdown = this TTL.
+IDENTITY_STAGING_TTL_SECONDS = int(
+    os.getenv("IDENTITY_STAGING_TTL_SECONDS", str(30 * 60))
+)
 DATE_CONTEXT_MAX_CHARS = int(os.getenv("DATE_CONTEXT_MAX_CHARS", "160"))
 DATE_SUGGESTION_MIN_SCORE = float(os.getenv("DATE_SUGGESTION_MIN_SCORE", "0.75"))
 DATE_SUGGESTION_TIE_TOLERANCE = float(
@@ -255,3 +263,14 @@ CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/1")
 CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 30 * 60
+
+# Belt-and-suspenders expiry sweep for abandoned identity extraction jobs.
+# The worker also schedules per-job delayed cleanup (countdown = staging TTL),
+# so this beat entry is only needed if a `celery beat` process is deployed.
+CELERY_BEAT_SCHEDULE = {
+    "cleanup-identity-extraction-jobs": {
+        "task": "identities.cleanup_identity_extraction_jobs",
+        "schedule": int(os.getenv("IDENTITY_STAGING_SWEEP_SECONDS", str(15 * 60))),
+        "args": [],
+    },
+}

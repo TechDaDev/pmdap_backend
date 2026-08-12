@@ -124,11 +124,20 @@ def test_extract_async_flow_returns_structured_result_without_db_record(
     raw = resp.content.decode()
     assert "SYNTHETIC TEST DOCUMENT" not in raw
     assert IdentityDocument.objects.count() == before
-    # Job row consumed (nothing persisted).
-    assert not IdentityExtractionJob.objects.filter(uuid=job_id).exists()
-    # Staging keys cleared from the job row.
-    assert job.front_key == ""
-    assert job.back_key == ""
+    # New lifecycle: a SUCCESS job is RETAINED so the client can finalize later
+    # via extraction_job_id (single upload). Staging keys are kept.
+    job.refresh_from_db()
+    assert IdentityExtractionJob.objects.filter(uuid=job_id).exists()
+    assert job.status == IdentityExtractionJob.Status.SUCCESS
+    assert job.front_key != ""
+    assert job.back_key != ""
+    # The cached result is NOT consumed on poll — polling again still works.
+    resp2 = api_client.get(f"{EXTRACT}{job_id}/")
+    assert resp2.status_code == 200
+    assert (
+        resp2.json()["data"]["fields"]["national_number"]["value"]
+        == "012345678901234"
+    )
 
 
 @pytest.mark.django_db

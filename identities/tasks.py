@@ -5,14 +5,19 @@ Staging images are read from private storage and deleted after processing.
 Extracted values are stored in the cache (TTL); no IdentityDocument is created.
 """
 import logging
+from datetime import timedelta
 
 from celery import shared_task
 from django.conf import settings
 from django.db import transaction
+from django.utils import timezone
 from PIL import Image
 
 from identities import extraction
-from identities.extraction_store import store_extraction_result
+from identities.extraction_store import (
+    clear_extraction_result,
+    store_extraction_result,
+)
 from identities.models import IdentityExtractionJob
 from identities.storage import private_identity_storage
 from processing.ocr import OCREngineUnavailableError, PaddleOCREngine
@@ -42,22 +47,87 @@ def _cleanup_staging(keys):
             )
 
 
-def _finish(job, *, status, error_code="", payload=None):
+def _finish(job, *, status, error_code="", payload=None, keep_staging=False):
+    """Persist a terminal job state.
+
+    On SUCCESS the staging keys are RETAINED (the job is finalized later by the
+    document-create endpoint using the staged images). On FAILED/EXPIRED the
+    staging keys are blanked after the worker already removed the objects.
+    """
     job.status = status
     job.error_code = error_code
+    update_fields = ["status", "error_code", "updated_at"]
+    if not keep_staging:
+        job.front_key = ""
+        job.back_key = ""
+        update_fields += ["front_key", "back_key"]
+    job.save(update_fields=update_fields)
+    if payload is not None:
+        store_extraction_result(job.uuid, payload)
+
+
+@shared_task(
+    name="identities.cleanup_identity_extraction_jobs",
+    queue="ocr",
+)
+def cleanup_identity_extraction_jobs(job_uuid=None):
+    """Explicit expiry cleanup for identity extraction jobs.
+
+    Two modes:
+      * job_uuid=<uuid>  — cleanup one job (scheduled by the worker on SUCCESS
+        with countdown = staging TTL). Never touches a FINALIZED job.
+      * job_uuid=None    — sweep ALL expired/abandoned jobs (management
+        command / celery beat).
+
+    Removes private staging images, the cached result and the job row. A
+    non-finalized SUCCESS job older than the staging TTL is expired.
+    """
+    if job_uuid is not None:
+        try:
+            job = IdentityExtractionJob.objects.select_for_update().get(
+                pk=job_uuid
+            )
+        except IdentityExtractionJob.DoesNotExist:
+            return None
+        if job.status == IdentityExtractionJob.Status.FINALIZED:
+            return None
+        if (
+            job.status == IdentityExtractionJob.Status.SUCCESS
+            and job.updated_at
+            and (timezone.now() - job.updated_at).total_seconds()
+            < settings.IDENTITY_STAGING_TTL_SECONDS
+        ):
+            # Not expired yet (race with an earlier finalize attempt).
+            return None
+        _expire_job(job)
+        return None
+
+    # Sweep mode: expire any abandoned job older than the staging TTL.
+    deadline = timezone.now() - timedelta(
+        seconds=settings.IDENTITY_STAGING_TTL_SECONDS
+    )
+    for job in IdentityExtractionJob.objects.filter(
+        status__in=(
+            IdentityExtractionJob.Status.PENDING,
+            IdentityExtractionJob.Status.PROCESSING,
+            IdentityExtractionJob.Status.SUCCESS,
+        ),
+        updated_at__lt=deadline,
+    ):
+        _expire_job(job)
+    return None
+
+
+def _expire_job(job):
+    _cleanup_staging(_staging_keys(job))
+    clear_extraction_result(job.uuid)
+    job.status = IdentityExtractionJob.Status.EXPIRED
     job.front_key = ""
     job.back_key = ""
     job.save(
-        update_fields=[
-            "status",
-            "error_code",
-            "front_key",
-            "back_key",
-            "updated_at",
-        ]
+        update_fields=["status", "front_key", "back_key", "updated_at"]
     )
-    if payload is not None:
-        store_extraction_result(job.uuid, payload)
+    job.delete()
 
 
 @shared_task(
@@ -97,17 +167,24 @@ def extract_identity_document(self, job_uuid):
                 image.close()
     except OCREngineUnavailableError:
         _cleanup_staging(keys)
-        _finish(job, status=IdentityExtractionJob.Status.FAILED, error_code="OCR_UNAVAILABLE")
+        _finish(
+            job,
+            status=IdentityExtractionJob.Status.FAILED,
+            error_code="OCR_UNAVAILABLE",
+        )
         return None
     except Exception:
         logger.warning(
             "identity extraction job %s OCR failed", job_uuid, exc_info=True
         )
         _cleanup_staging(keys)
-        _finish(job, status=IdentityExtractionJob.Status.FAILED, error_code="EXTRACTION_FAILED")
+        _finish(
+            job,
+            status=IdentityExtractionJob.Status.FAILED,
+            error_code="EXTRACTION_FAILED",
+        )
         return None
 
-    _cleanup_staging(keys)
     fields, warnings, mrz_summary = extraction.extract_identity(
         job.document_type, lines
     )
@@ -131,10 +208,19 @@ def extract_identity_document(self, job_uuid):
         bucket_summary,
         mrz_summary.get("detected"),
     )
+    # SUCCESS keeps the staging images: the client finalizes later through the
+    # document-create endpoint using extraction_job_id (single upload).
     _finish(
         job,
         status=IdentityExtractionJob.Status.SUCCESS,
         payload=payload,
+        keep_staging=True,
+    )
+    # Schedule expiry cleanup so abandoned staging never persists forever.
+    cleanup_identity_extraction_jobs.apply_async(
+        args=[str(job.uuid)],
+        countdown=settings.IDENTITY_STAGING_TTL_SECONDS,
+        expires=settings.IDENTITY_STAGING_TTL_SECONDS * 4,
     )
     # NEVER return the payload: Celery logs the task return value verbatim,
     # which would leak extracted identity values into worker logs. Return a

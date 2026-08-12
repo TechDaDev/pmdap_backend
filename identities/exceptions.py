@@ -32,3 +32,21 @@ class IdentityFileStorageFailed(APIException):
 class IdentityExtractionJobNotFound(NotFound):
     default_detail = "Identity extraction job does not exist or has expired."
     default_code = "extraction_job_not_found"
+
+
+class IdentityExtractionJobConflict(APIException):
+    status_code = 409
+    default_detail = "Identity extraction job cannot be finalized."
+    default_code = "extraction_job_conflict"
+
+
+class IdentityExtractionJobExpired(APIException):
+    status_code = 409
+    default_detail = "Identity extraction job has expired."
+    default_code = "extraction_job_expired"
+
+
+class IdentityExtractionJobMismatch(APIException):
+    status_code = 400
+    default_detail = "Identity extraction job does not match the submission."
+    default_code = "extraction_job_mismatch"

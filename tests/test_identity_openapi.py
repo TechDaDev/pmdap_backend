@@ -42,11 +42,14 @@ def test_multipart_contract_documents_binary_files(api_client):
         request_schema = resolve_schema(
             schema, content["multipart/form-data"]["schema"]
         )
-        assert request_schema["properties"]["front_image"] == {
-            "type": "string",
-            "format": "binary",
-        }
+        # Image files are binary but now OPTIONAL (extraction_job_id finalize).
+        assert request_schema["properties"]["front_image"]["format"] == "binary"
         assert request_schema["properties"]["back_image"]["format"] == "binary"
+        assert "front_image" not in request_schema.get("required", [])
+        # Single-upload finalize contract.
+        assert (
+            request_schema["properties"]["extraction_job_id"]["format"] == "uuid"
+        )
 
 
 def test_openapi_input_and_output_hide_internal_fields(api_client):

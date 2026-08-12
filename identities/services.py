@@ -14,9 +14,26 @@ from PIL import Image, UnidentifiedImageError
 from accounts.models import User
 from audit.models import AuditLog
 from audit.services import record_audit
-from identities.exceptions import IdentityDocumentConflict, IdentityTransitionConflict
-from identities.models import IdentityDocument, IdentityDocumentEvent, IdentityFile
+from identities.exceptions import (
+    IdentityDocumentConflict,
+    IdentityExtractionJobConflict,
+    IdentityExtractionJobMismatch,
+    IdentityFileStorageFailed,
+    IdentityTransitionConflict,
+)
+from identities.models import (
+    IdentityDocument,
+    IdentityDocumentEvent,
+    IdentityExtractionJob,
+    IdentityFile,
+)
+from identities.storage import private_identity_storage
 from patients.models import PatientProfile
+
+try:
+    from botocore.exceptions import ClientError as _S3ClientError
+except ImportError:  # pragma: no cover - S3 client is optional in minimal installs
+    _S3ClientError = OSError
 
 ALLOWED_IMAGE_FORMATS = {"JPEG": ("image/jpeg", ".jpg"), "PNG": ("image/png", ".png")}
 
@@ -28,6 +45,45 @@ class ValidatedIdentityUpload:
     media_type: str
     extension: str
     sha256: str
+
+
+def _media_type_for_key(key: str) -> str:
+    return "image/png" if (key or "").lower().endswith(".png") else "image/jpeg"
+
+
+class _BytesUpload:
+    """Minimal UploadedFile-like wrapper over raw bytes.
+
+    Lets [inspect_identity_upload] re-validate staged identity images before
+    they are promoted to permanent storage.
+    """
+
+    def __init__(self, content, name, content_type):
+        self._content = bytes(content)
+        self.name = name
+        self.content_type = content_type
+        self._pos = 0
+
+    @property
+    def size(self):
+        return len(self._content)
+
+    def read(self, size=-1):
+        if size is None or size < 0:
+            size = len(self._content) - self._pos
+        data = self._content[self._pos : self._pos + size]
+        self._pos += len(data)
+        return data
+
+    def seek(self, offset, whence=0):
+        if whence == 0:
+            self._pos = offset
+        elif whence == 1:
+            self._pos += offset
+        elif whence == 2:
+            self._pos = len(self._content) + offset
+        else:  # pragma: no cover - only used internally
+            raise ValueError("unsupported whence")
 
 
 def inspect_identity_upload(upload):
@@ -142,28 +198,46 @@ def _sync_profile_identity_status(profile):
     return new_status
 
 
-def submit_identity_document(*, patient, actor, validated_data, replaces=None):
-    front_upload = validated_data.pop("front_image")
-    back_upload = validated_data.pop("back_image", None)
-    front_validated = inspect_identity_upload(front_upload)
-    back_validated = inspect_identity_upload(back_upload) if back_upload else None
-    stored_names = []
+def _current_type_conflict(patient, document_type, exclude_pk=None):
+    """True when a CURRENT PENDING/VERIFIED document of the same type exists."""
+    queryset = IdentityDocument.objects.filter(
+        patient=patient,
+        document_type=document_type,
+        status=IdentityDocument.LifecycleStatus.CURRENT,
+        verification_status__in=(
+            IdentityDocument.VerificationStatus.PENDING,
+            IdentityDocument.VerificationStatus.VERIFIED,
+        ),
+    )
+    if exclude_pk is not None:
+        queryset = queryset.exclude(pk=exclude_pk)
+    return queryset.exists()
+
+
+def _create_document(
+    *,
+    patient,
+    actor,
+    validated_data,
+    front_validated,
+    back_validated,
+    replaces=None,
+):
+    """Create an IdentityDocument from validated image bytes inside a
+    transaction. Shared by the legacy multipart submit and the
+    extraction-job finalize paths so conflict/audit/event logic cannot drift.
+
+    On failure any promoted permanent file objects (and their IdentityFile
+    rows) are removed; nothing is left behind as an orphan.
+    """
+    stored = []
     try:
         with transaction.atomic():
             patient = PatientProfile.objects.select_for_update().get(pk=patient.pk)
             document_type = validated_data["document_type"]
             source = None
             if replaces is None:
-                conflict = IdentityDocument.objects.filter(
-                    patient=patient,
-                    document_type=document_type,
-                    status=IdentityDocument.LifecycleStatus.CURRENT,
-                    verification_status__in=(
-                        IdentityDocument.VerificationStatus.PENDING,
-                        IdentityDocument.VerificationStatus.VERIFIED,
-                    ),
-                ).exists()
-                if conflict:
+                if _current_type_conflict(patient, document_type):
                     raise IdentityDocumentConflict()
             else:
                 source = IdentityDocument.objects.select_for_update().get(
@@ -176,25 +250,15 @@ def submit_identity_document(*, patient, actor, validated_data, replaces=None):
                     or source.document_type != document_type
                 ):
                     raise IdentityTransitionConflict()
-                pending_exists = (
-                    IdentityDocument.objects.filter(
-                        patient=patient,
-                        document_type=document_type,
-                        status=IdentityDocument.LifecycleStatus.CURRENT,
-                        verification_status=IdentityDocument.VerificationStatus.PENDING,
-                    )
-                    .exclude(pk=source.pk)
-                    .exists()
-                )
-                if pending_exists:
+                if _current_type_conflict(patient, document_type, exclude_pk=source.pk):
                     raise IdentityDocumentConflict()
 
             front = _persist_file(front_validated)
-            stored_names.append((front.file.storage, front.file.name))
+            stored.append((front.file.storage, front.file.name, front.pk))
             back = None
             if back_validated:
                 back = _persist_file(back_validated)
-                stored_names.append((back.file.storage, back.file.name))
+                stored.append((back.file.storage, back.file.name, back.pk))
             document = IdentityDocument.objects.create(
                 patient=patient,
                 front_image=front,
@@ -231,9 +295,144 @@ def submit_identity_document(*, patient, actor, validated_data, replaces=None):
             _sync_profile_identity_status(patient)
             return document
     except Exception:
-        for storage, name in stored_names:
-            storage.delete(name)
+        # Storage is external to the DB transaction: remove any promoted
+        # objects AND their IdentityFile rows so nothing is orphaned.
+        for storage, name, identity_file_pk in stored:
+            try:
+                storage.delete(name)
+            except Exception:  # pragma: no cover - storage failure path
+                pass
+            IdentityFile.objects.filter(pk=identity_file_pk).delete()
         raise
+
+
+def submit_identity_document(*, patient, actor, validated_data, replaces=None):
+    """LEGACY direct-multipart submit (images uploaded with this request)."""
+    front_upload = validated_data.pop("front_image")
+    back_upload = validated_data.pop("back_image", None)
+    front_validated = inspect_identity_upload(front_upload)
+    back_validated = inspect_identity_upload(back_upload) if back_upload else None
+    return _create_document(
+        patient=patient,
+        actor=actor,
+        validated_data=validated_data,
+        front_validated=front_validated,
+        back_validated=back_validated,
+        replaces=replaces,
+    )
+
+
+def _read_staged_validated(job, key, name):
+    """Read + re-validate a staged identity image before promotion.
+
+    Staging is not trusted just because OCR succeeded: the same identity
+    upload safety rules are applied again.
+    """
+    if not key:
+        raise IdentityExtractionJobMismatch(f"{name} image is missing.")
+    try:
+        with private_identity_storage.open(key, "rb") as handle:
+            content = handle.read()
+    except (OSError, _S3ClientError) as exc:
+        raise IdentityFileStorageFailed() from exc
+    if not content:
+        raise IdentityExtractionJobMismatch(f"{name} image is empty.")
+    upload = _BytesUpload(
+        content,
+        f"{name}.{_media_type_for_key(key).split('/')[1]}",
+        _media_type_for_key(key),
+    )
+    try:
+        return inspect_identity_upload(upload)
+    except ValidationError as exc:
+        # Never leak the validation detail; the staged content is unusable.
+        raise IdentityExtractionJobMismatch(
+            "Staged identity image failed validation."
+        ) from exc
+
+
+def finalize_identity_document(
+    *, patient, actor, validated_data, job, replaces=None
+):
+    """Finalize a successful extraction job into a real IdentityDocument.
+
+    The job's staged images are promoted to permanent storage. The job is
+    consumed exactly once (single-use), guarded by select_for_update inside
+    the same transaction as document creation.
+
+    Ownership: only the job owner (request.user == job.user) can finalize.
+    A different user receives a 404 (existence is not revealed).
+
+    Post-commit, staging objects + cached result + the consumed job row are
+    removed. On failure the promoted permanent objects are rolled back and
+    staging is preserved so the client can retry.
+    """
+    validated_data = {
+        key: value
+        for key, value in validated_data.items()
+        if key not in ("front_image", "back_image")
+    }
+    with transaction.atomic():
+        job = IdentityExtractionJob.objects.select_for_update().get(pk=job.pk)
+        if job.user_id != actor.pk:
+            # 404 — never reveal that the job exists for another user.
+            from identities.exceptions import IdentityExtractionJobNotFound
+
+            raise IdentityExtractionJobNotFound()
+        if job.status != IdentityExtractionJob.Status.SUCCESS:
+            if job.status == IdentityExtractionJob.Status.EXPIRED:
+                from identities.exceptions import IdentityExtractionJobExpired
+
+                raise IdentityExtractionJobExpired()
+            from identities.exceptions import IdentityExtractionJobConflict
+
+            raise IdentityExtractionJobConflict()
+        if job.document_type != validated_data["document_type"]:
+            raise IdentityExtractionJobMismatch()
+        if (
+            validated_data["document_type"]
+            == IdentityDocument.DocumentType.UNIFIED_NATIONAL_CARD
+            and not job.back_key
+        ):
+            raise IdentityExtractionJobMismatch("Back image staging is missing.")
+
+        front_validated = _read_staged_validated(job, job.front_key, "front")
+        back_validated = (
+            _read_staged_validated(job, job.back_key, "back")
+            if job.back_key
+            else None
+        )
+        document = _create_document(
+            patient=patient,
+            actor=actor,
+            validated_data=validated_data,
+            front_validated=front_validated,
+            back_validated=back_validated,
+            replaces=replaces,
+        )
+        # Single-use guard committed atomically with the document.
+        job.status = IdentityExtractionJob.Status.FINALIZED
+        job.save(update_fields=["status", "updated_at"])
+    # Committed: remove staging + cached result + consumed job row.
+    _finalize_job_cleanup(job)
+    return document
+
+
+def _finalize_job_cleanup(job):
+    """Remove staging + cached result after a committed finalization."""
+    from identities.extraction_store import clear_extraction_result
+
+    if job:
+        for key in (job.front_key, job.back_key):
+            if not key:
+                continue
+            try:
+                if private_identity_storage.exists(key):
+                    private_identity_storage.delete(key)
+            except Exception:  # pragma: no cover - storage failure path
+                pass
+        clear_extraction_result(job.uuid)
+        job.delete()
 
 
 def approve_identity_document(*, document, agent):

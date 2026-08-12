@@ -186,7 +186,9 @@ class IdentityExtractionJob(UUIDModel):
         PENDING = "PENDING", "Pending"
         PROCESSING = "PROCESSING", "Processing"
         SUCCESS = "SUCCESS", "Success"
+        FINALIZED = "FINALIZED", "Finalized"
         FAILED = "FAILED", "Failed"
+        EXPIRED = "EXPIRED", "Expired"
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,

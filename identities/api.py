@@ -3,7 +3,7 @@ from django.http import FileResponse
 from drf_spectacular.utils import OpenApiParameter, extend_schema, inline_serializer
 from rest_framework import serializers, status
 from rest_framework.pagination import PageNumberPagination
-from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -44,6 +44,7 @@ from identities.serializers import (
 )
 from identities.services import (
     approve_identity_document,
+    finalize_identity_document,
     reject_identity_document,
     submit_identity_document,
 )
@@ -123,7 +124,7 @@ def page_response(request, queryset, serializer_class):
 
 
 class IdentityDocumentCollectionView(APIView):
-    parser_classes = (MultiPartParser, FormParser)
+    parser_classes = (MultiPartParser, FormParser, JSONParser)
 
     @extend_schema(
         operation_id="identity_document_list",
@@ -163,11 +164,22 @@ class IdentityDocumentCollectionView(APIView):
         profile = owned_profile(request.user)
         serializer = IdentityDocumentInputSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        document = submit_identity_document(
-            patient=profile,
-            actor=request.user,
-            validated_data=dict(serializer.validated_data),
-        )
+        validated_data = dict(serializer.validated_data)
+        job_id = validated_data.pop("extraction_job_id", None)
+        if job_id is not None:
+            job = _owned_extraction_job(request.user, job_id)
+            document = finalize_identity_document(
+                patient=profile,
+                actor=request.user,
+                validated_data=validated_data,
+                job=job,
+            )
+        else:
+            document = submit_identity_document(
+                patient=profile,
+                actor=request.user,
+                validated_data=validated_data,
+            )
         return Response(
             {"data": IdentityDocumentDetailSerializer(document).data},
             status=status.HTTP_201_CREATED,
@@ -194,7 +206,7 @@ class IdentityDocumentDetailView(APIView):
 
 
 class IdentityDocumentReplaceView(APIView):
-    parser_classes = (MultiPartParser, FormParser)
+    parser_classes = (MultiPartParser, FormParser, JSONParser)
 
     @extend_schema(
         operation_id="identity_document_replace",
@@ -216,12 +228,24 @@ class IdentityDocumentReplaceView(APIView):
         source = patient_document(request.user, document_uuid)
         serializer = IdentityDocumentInputSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        document = submit_identity_document(
-            patient=source.patient,
-            actor=request.user,
-            validated_data=dict(serializer.validated_data),
-            replaces=source,
-        )
+        validated_data = dict(serializer.validated_data)
+        job_id = validated_data.pop("extraction_job_id", None)
+        if job_id is not None:
+            job = _owned_extraction_job(request.user, job_id)
+            document = finalize_identity_document(
+                patient=source.patient,
+                actor=request.user,
+                validated_data=validated_data,
+                job=job,
+                replaces=source,
+            )
+        else:
+            document = submit_identity_document(
+                patient=source.patient,
+                actor=request.user,
+                validated_data=validated_data,
+                replaces=source,
+            )
         return Response(
             {"data": IdentityDocumentDetailSerializer(document).data},
             status=status.HTTP_201_CREATED,
@@ -415,6 +439,25 @@ def _cleanup_staging_keys(keys):
             )
 
 
+def _owned_extraction_job(user, job_uuid):
+    """Fetch a job owned by [user]; 404 hides the job's existence otherwise."""
+    try:
+        return IdentityExtractionJob.objects.get(uuid=job_uuid, user=user)
+    except IdentityExtractionJob.DoesNotExist:
+        raise IdentityExtractionJobNotFound() from None
+
+
+def _expire_job_for_poll(job):
+    """Expire a SUCCESS job whose cached result already vanished."""
+    _cleanup_staging_keys([job.front_key, job.back_key])
+    clear_extraction_result(job.uuid)
+    job.status = IdentityExtractionJob.Status.EXPIRED
+    job.front_key = ""
+    job.back_key = ""
+    job.save(update_fields=["status", "front_key", "back_key", "updated_at"])
+    job.delete()
+
+
 class IdentityExtractionView(APIView):
     """Advisory identity extraction (async via the OCR worker queue).
 
@@ -513,14 +556,15 @@ class IdentityExtractionStatusView(APIView):
             job.delete()
             return Response({"data": data})
 
-        # SUCCESS: result lives in the cache (TTL). Consume once, then delete
-        # the job row so identity values are never persisted.
+        # SUCCESS: result lives in the cache (TTL). The job is NOT deleted and
+        # the cache is NOT consumed here — the client finalizes later through
+        # the document-create endpoint using extraction_job_id (single upload).
         result = read_extraction_result(job.uuid)
         if result is None:
-            job.delete()
+            # Result expired while the user was reviewing: the job can no
+            # longer be finalized, so expire it and force a re-extraction.
+            _expire_job_for_poll(job)
             raise IdentityExtractionJobNotFound() from None
-        clear_extraction_result(job.uuid)
-        job.delete()
         return Response(
             {
                 "data": {
