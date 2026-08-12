@@ -171,3 +171,41 @@ class IdentityDocumentEvent(UUIDModel):
 
     def delete(self, *args, **kwargs):
         raise ValidationError("Identity document events are immutable.")
+
+
+class IdentityExtractionJob(UUIDModel):
+    """Transient async extraction job.
+
+    Holds status + S3/local staging keys only. Extracted field values are kept
+    in the cache (TTL) so identity values are never persisted; the job row is
+    deleted once the client consumes the result. Staging images are removed by
+    the worker after processing.
+    """
+
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        PROCESSING = "PROCESSING", "Processing"
+        SUCCESS = "SUCCESS", "Success"
+        FAILED = "FAILED", "Failed"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="identity_extraction_jobs",
+    )
+    document_type = models.CharField(
+        max_length=32,
+        choices=IdentityDocument.DocumentType.choices,
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+    )
+    front_key = models.CharField(max_length=512, blank=True, default="")
+    back_key = models.CharField(max_length=512, blank=True, default="")
+    error_code = models.CharField(max_length=64, blank=True, default="")
+
+    def __str__(self):
+        return f"{self.uuid} {self.status}"

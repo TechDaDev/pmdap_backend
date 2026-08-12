@@ -1,6 +1,4 @@
 import logging
-import os
-import tempfile
 from django.http import FileResponse
 from drf_spectacular.utils import OpenApiParameter, extend_schema, inline_serializer
 from rest_framework import serializers, status
@@ -14,10 +12,17 @@ from accounts.serializers import ErrorEnvelopeSerializer
 from identities import extraction
 from identities.exceptions import (
     IdentityDocumentNotFound,
+    IdentityExtractionJobNotFound,
     IdentityFileStorageFailed,
     VerificationAgentRequired,
 )
-from identities.models import IdentityDocument
+from identities.extraction_store import (
+    clear_extraction_result,
+    read_extraction_result,
+)
+from identities.models import IdentityDocument, IdentityExtractionJob
+from identities.storage import private_identity_storage
+from identities.tasks import extract_identity_document
 
 try:
     from botocore.exceptions import ClientError as _S3ClientError
@@ -29,8 +34,9 @@ from identities.serializers import (
     IdentityDocumentDetailSerializer,
     IdentityDocumentInputSerializer,
     IdentityDocumentSummarySerializer,
+    IdentityExtractionJobSerializer,
     IdentityExtractionRequestSerializer,
-    IdentityExtractionResponseSerializer,
+    IdentityExtractionStatusSerializer,
     RejectionSerializer,
     VerificationDetailSerializer,
     VerificationQueueFilterSerializer,
@@ -45,7 +51,7 @@ from patients.api import owned_profile, require_patient
 
 logger = logging.getLogger(__name__)
 
-EXTRACTOR_VERSION = "identity-v1"
+EXTRACTOR_VERSION = extraction.EXTRACTOR_VERSION
 
 
 def envelope(name, child):
@@ -369,12 +375,6 @@ class VerificationRejectView(APIView):
         return Response({"data": VerificationDetailSerializer(document).data})
 
 
-def _write_upload(upload, path: str) -> None:
-    with open(path, "wb") as out:
-        for chunk in upload.chunks():
-            out.write(chunk)
-
-
 def _safe_ext(name: str) -> str:
     lower = (name or "").lower()
     if lower.endswith(".png"):
@@ -386,17 +386,42 @@ def _safe_ext(name: str) -> str:
     return ".jpg"
 
 
-def _confidence_bucket(conf: float) -> str:
-    if conf >= 0.90:
-        return "high"
-    if conf >= 0.70:
-        return "medium"
-    return "low"
+def _store_staging(job, filename: str, upload) -> str:
+    """Write an uploaded identity image to private storage (transient staging).
+
+    The key is job-scoped so the OCR worker can read it; the worker deletes the
+    object after processing. Uploaded images are never stored in the DB.
+    """
+    key = f"extract_staging/{job.uuid}/{filename}"
+    try:
+        private_identity_storage.save(key, upload)
+    except Exception as exc:
+        raise IdentityFileStorageFailed() from exc
+    return key
+
+
+def _cleanup_staging_keys(keys):
+    for key in keys:
+        if not key:
+            continue
+        try:
+            if private_identity_storage.exists(key):
+                private_identity_storage.delete(key)
+        except Exception:  # pragma: no cover - storage failure path
+            logger.warning(
+                "identity extraction staging cleanup failed for %s",
+                key,
+                exc_info=True,
+            )
 
 
 class IdentityExtractionView(APIView):
-    """Advisory identity extraction (no IdentityDocument is created, no raw OCR
-    text is returned or logged). Requires an authenticated PATIENT."""
+    """Advisory identity extraction (async via the OCR worker queue).
+
+    Returns a 202 with a job_id; the client polls the status endpoint. No
+    IdentityDocument is created and no raw OCR text is returned or logged.
+    Requires an authenticated PATIENT.
+    """
 
     parser_classes = [MultiPartParser, FormParser]
     serializer_class = IdentityExtractionRequestSerializer
@@ -405,10 +430,11 @@ class IdentityExtractionView(APIView):
         operation_id="identity_document_extract",
         request=IdentityExtractionRequestSerializer,
         responses={
-            200: envelope("IdentityExtraction", IdentityExtractionResponseSerializer),
+            202: envelope("IdentityExtractionJob", IdentityExtractionJobSerializer),
             400: ErrorEnvelopeSerializer,
             401: ErrorEnvelopeSerializer,
             403: ErrorEnvelopeSerializer,
+            503: ErrorEnvelopeSerializer,
         },
         tags=["Identity documents"],
     )
@@ -418,40 +444,89 @@ class IdentityExtractionView(APIView):
         serializer.is_valid(raise_exception=True)
 
         document_type = serializer.validated_data["document_type"]
-        with tempfile.TemporaryDirectory(prefix="pmdap_extract_") as tmp:
-            front = serializer.validated_data["front_image"]
-            front_path = os.path.join(tmp, "front" + _safe_ext(front.name))
-            _write_upload(front, front_path)
-            back = serializer.validated_data.get("back_image")
-            back_path = None
+        job = IdentityExtractionJob.objects.create(
+            user=request.user,
+            document_type=document_type,
+        )
+        front = serializer.validated_data["front_image"]
+        front_key = _store_staging(job, "front" + _safe_ext(front.name), front)
+        back = serializer.validated_data.get("back_image")
+        back_key = ""
+        try:
             if back:
-                back_path = os.path.join(tmp, "back" + _safe_ext(back.name))
-                _write_upload(back, back_path)
+                back_key = _store_staging(
+                    job, "back" + _safe_ext(back.name), back
+                )
+            job.front_key = front_key
+            job.back_key = back_key
+            job.save(update_fields=["front_key", "back_key", "updated_at"])
+        except IdentityFileStorageFailed:
+            _cleanup_staging_keys([front_key, back_key])
+            job.delete()
+            raise
 
-            lines = extraction.ocr_text(front_path)
-            if back_path:
-                lines.extend(extraction.ocr_text(back_path))
-            fields, warnings, mrz_summary = extraction.extract_identity(
-                document_type, lines
+        extract_identity_document.delay(str(job.uuid))
+        return Response(
+            {"data": {"job_id": str(job.uuid), "status": job.status}},
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+
+class IdentityExtractionStatusView(APIView):
+    """Poll the result of an async extraction job."""
+
+    @extend_schema(
+        operation_id="identity_document_extract_status",
+        responses={
+            200: envelope(
+                "IdentityExtractionStatus", IdentityExtractionStatusSerializer
+            ),
+            401: ErrorEnvelopeSerializer,
+            403: ErrorEnvelopeSerializer,
+            404: ErrorEnvelopeSerializer,
+        },
+        tags=["Identity documents"],
+    )
+    def get(self, request, job_uuid):
+        require_patient(request.user)
+        try:
+            job = IdentityExtractionJob.objects.get(
+                uuid=job_uuid, user=request.user
+            )
+        except IdentityExtractionJob.DoesNotExist:
+            raise IdentityExtractionJobNotFound() from None
+
+        if job.status in (
+            IdentityExtractionJob.Status.PENDING,
+            IdentityExtractionJob.Status.PROCESSING,
+        ):
+            return Response(
+                {"data": {"job_id": str(job.uuid), "status": job.status}}
             )
 
-        # Safe log: endpoint, type, status, field names + confidence buckets.
-        # NEVER log values / raw OCR / image bytes.
-        bucket_summary = {name: _confidence_bucket(f["confidence"]) for name, f in fields.items()}
-        logger.info(
-            "POST /identity-documents/extract/ type=%s ok fields=%s mrz=%s",
-            document_type,
-            bucket_summary,
-            mrz_summary.get("detected"),
-        )
+        if job.status == IdentityExtractionJob.Status.FAILED:
+            data = {
+                "job_id": str(job.uuid),
+                "status": job.status,
+                "error_code": job.error_code,
+            }
+            job.delete()
+            return Response({"data": data})
+
+        # SUCCESS: result lives in the cache (TTL). Consume once, then delete
+        # the job row so identity values are never persisted.
+        result = read_extraction_result(job.uuid)
+        if result is None:
+            job.delete()
+            raise IdentityExtractionJobNotFound() from None
+        clear_extraction_result(job.uuid)
+        job.delete()
         return Response(
             {
                 "data": {
-                    "document_type": document_type,
-                    "extractor_version": EXTRACTOR_VERSION,
-                    "fields": fields,
-                    "warnings": warnings,
-                    "mrz": mrz_summary,
+                    **result,
+                    "job_id": str(job.uuid),
+                    "status": IdentityExtractionJob.Status.SUCCESS,
                 }
             }
         )

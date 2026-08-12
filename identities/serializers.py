@@ -220,3 +220,29 @@ class RejectionSerializer(RejectUnknownFieldsMixin, serializers.Serializer):
     rejection_reason = serializers.CharField(
         min_length=1, max_length=1000, trim_whitespace=True
     )
+
+
+class IdentityExtractionJobSerializer(serializers.Serializer):
+    """POST /extract/ 202 response: async job created."""
+
+    job_id = serializers.UUIDField()
+    status = serializers.CharField()
+
+
+class IdentityExtractionStatusSerializer(serializers.Serializer):
+    """GET /extract/<job_id>/ poll response."""
+
+    job_id = serializers.UUIDField()
+    status = serializers.CharField()
+    error_code = serializers.CharField(required=False, default="")
+    document_type = serializers.CharField(required=False, default="")
+    extractor_version = serializers.CharField(required=False, default="")
+    fields = serializers.DictField(
+        child=ExtractedIdentityFieldSerializer(),
+        required=False,
+        default=dict,
+    )
+    warnings = serializers.ListField(
+        child=serializers.CharField(), required=False, default=list
+    )
+    mrz = MrzValidationSerializer(required=False)

@@ -16,6 +16,9 @@ from identities import mrz
 
 logger = logging.getLogger(__name__)
 
+# Response contract version.
+EXTRACTOR_VERSION = "identity-v1"
+
 # Source values used in the response contract.
 SRC_MRZ = "MRZ"
 SRC_OCR = "OCR"
@@ -203,3 +206,12 @@ def extract_identity(document_type: str, lines: list[str]) -> tuple[dict, list[s
         "checks_passed": result.checks_passed,
     }
     return fields, warnings, mrz_summary
+
+
+def confidence_bucket(conf: float) -> str:
+    """Coarse confidence bucket for SAFE logging only (no values)."""
+    if conf >= 0.90:
+        return "high"
+    if conf >= 0.70:
+        return "medium"
+    return "low"

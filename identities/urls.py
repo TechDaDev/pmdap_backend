@@ -5,6 +5,7 @@ from identities.api import (
     IdentityDocumentDetailView,
     IdentityDocumentImageView,
     IdentityDocumentReplaceView,
+    IdentityExtractionStatusView,
     IdentityExtractionView,
 )
 
@@ -14,6 +15,11 @@ urlpatterns = [
         "extract/",
         IdentityExtractionView.as_view(),
         name="identity-document-extract",
+    ),
+    path(
+        "extract/<uuid:job_uuid>/",
+        IdentityExtractionStatusView.as_view(),
+        name="identity-document-extract-status",
     ),
     path(
         "<uuid:document_uuid>/",
