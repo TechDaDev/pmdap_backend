@@ -8,6 +8,7 @@ Extraction NEVER persists an IdentityDocument and NEVER returns raw OCR text.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import threading
 
@@ -47,9 +48,13 @@ def _load_ocr():
             return _ocr
         _ocr_attempted = True
         try:
+            # PaddlePaddle 3.x CPU inference crashes through the oneDNN/PIR
+            # path on this stack (ConvertPirAttribute2RuntimeAttribute); force
+            # the reference (non-MKLDNN) path.
+            os.environ.setdefault("FLAGS_use_mkldnn", "0")
             from paddleocr import PaddleOCR  # type: ignore
 
-            _ocr = PaddleOCR(use_angle_cls=True, lang="en", show_log=False)
+            _ocr = PaddleOCR(lang="en", enable_mkldnn=False)
         except Exception as exc:  # pragma: no cover - env dependent
             logger.warning("identity OCR unavailable: %s", type(exc).__name__)
             _ocr = None
@@ -62,17 +67,22 @@ def ocr_text(image_path: str) -> list[str]:
     if engine is None:
         return []
     try:
-        result = engine.ocr(image_path, cls=True)
+        # PaddleOCR 3.x: `predict()` returns PaddleX result objects that carry
+        # a `rec_texts` list (the legacy `ocr(..., cls=True)` API is removed).
+        results = engine.predict(image_path)
         lines: list[str] = []
-        for page in result or []:
-            for item in page or []:
-                if isinstance(item, (list, tuple)) and len(item) >= 2:
-                    text = str(item[1][0]) if isinstance(item[1], (list, tuple)) else str(item[1])
-                    if text:
-                        lines.append(text.strip())
+        for result in results or []:
+            if isinstance(result, dict):
+                texts = result.get("rec_texts")
+            else:
+                texts = getattr(result, "rec_texts", None)
+            for text in texts or []:
+                text = str(text).strip()
+                if text:
+                    lines.append(text)
         return lines
     except Exception:  # pragma: no cover - engine failure path
-        logger.warning("identity OCR inference failed for %s", type(image_path).__name__)
+        logger.warning("identity OCR inference failed", exc_info=True)
         return []
 
 
