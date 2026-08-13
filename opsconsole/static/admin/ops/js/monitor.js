@@ -40,14 +40,16 @@
       var card = document.createElement("div");
       card.className = "ops-service-card";
       card.id = "svc-" + name.replace(/[^a-zA-Z0-9_-]/g, "_");
+      // Summary element ids must be unique per service (charts already are).
+      function curId(metric) { return "cur-" + name.replace(/[^a-zA-Z0-9_-]/g, "_") + "-" + metric; }
       card.innerHTML =
         '<h2>' + escapeHtml(name) + '</h2>' +
         '<div class="ops-service-summary">' +
-          '<div class="ops-summary-item"><span class="ops-current" id="cur-CPU_USAGE" data-metric="CPU_USAGE">-</span> <span class="ops-label">vCPU now</span></div>' +
-          '<div class="ops-summary-item"><span class="ops-current" id="cur-MEMORY_USAGE_GB" data-metric="MEMORY_USAGE_GB">-</span> <span class="ops-label">GB now</span></div>' +
-          '<div class="ops-summary-item"><span class="ops-current" id="cur-DISK_USAGE_GB" data-metric="DISK_USAGE_GB">-</span> <span class="ops-label">GB now</span></div>' +
-          '<div class="ops-summary-item"><span class="ops-current" id="cur-NETWORK_TX_GB" data-metric="NETWORK_TX_GB">-</span> <span class="ops-label">MB/s out</span></div>' +
-          '<div class="ops-summary-item"><span class="ops-current" id="cur-NETWORK_RX_GB" data-metric="NETWORK_RX_GB">-</span> <span class="ops-label">MB/s in</span></div>' +
+          '<div class="ops-summary-item"><span class="ops-current" id="' + curId("CPU_USAGE") + '" data-metric="CPU_USAGE">-</span> <span class="ops-label">vCPU now</span></div>' +
+          '<div class="ops-summary-item"><span class="ops-current" id="' + curId("MEMORY_USAGE_GB") + '" data-metric="MEMORY_USAGE_GB">-</span> <span class="ops-label">GB now</span></div>' +
+          '<div class="ops-summary-item"><span class="ops-current" id="' + curId("DISK_USAGE_GB") + '" data-metric="DISK_USAGE_GB">-</span> <span class="ops-label">GB now</span></div>' +
+          '<div class="ops-summary-item"><span class="ops-current" id="' + curId("NETWORK_TX_GB") + '" data-metric="NETWORK_TX_GB">-</span> <span class="ops-label">MB/s out</span></div>' +
+          '<div class="ops-summary-item"><span class="ops-current" id="' + curId("NETWORK_RX_GB") + '" data-metric="NETWORK_RX_GB">-</span> <span class="ops-label">MB/s in</span></div>' +
         '</div>' +
         '<div class="ops-chart"><canvas id="chart-cpu-' + escapeHtml(name) + '" aria-label="CPU usage for ' + escapeHtml(name) + '"></canvas></div>' +
         '<div class="ops-chart"><canvas id="chart-mem-' + escapeHtml(name) + '" aria-label="Memory and disk usage for ' + escapeHtml(name) + '"></canvas></div>' +
@@ -144,9 +146,10 @@
       NETWORK_TX_GB: fmt(lastValue(tx), 2) + " MB/s (peak " + fmt(maxValue(tx), 2) + ")",
       NETWORK_RX_GB: fmt(lastValue(rx), 2) + " MB/s (peak " + fmt(maxValue(rx), 2) + ")"
     };
+    var prefix = "cur-" + name.replace(/[^a-zA-Z0-9_-]/g, "_") + "-";
     Object.keys(ids).forEach(function (metric) {
-      var el = document.getElementById("cur-" + metric);
-      if (el) el.textContent = ids[metric];
+      var summaryEl = document.getElementById(prefix + metric);
+      if (summaryEl) summaryEl.textContent = ids[metric];
     });
   }
 
