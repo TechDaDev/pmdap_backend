@@ -1,0 +1,92 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block title %}{% translate 'Review identity document' %} | {{ site_title|default:_('Django site admin') }}{% endblock %}
+
+{% block content %}
+<h1>{% translate 'Review identity document' %}</h1>
+<p class="quiet">{{ document.get_document_type_display }} &middot; submitted {{ document.created_at|date:"Y-m-d H:i" }}</p>
+
+{% if messages %}
+  <ul class="messagelist">
+    {% for message in messages %}
+      <li class="{{ message.tags }}">{{ message|capfirst }}</li>
+    {% endfor %}
+  </ul>
+{% endif %}
+
+{% if document.verification_status != 'PENDING' or document.status != 'CURRENT' %}
+  <p class="errornote">
+    {% translate 'This document is no longer pending verification' %}
+    ({{ document.get_verification_status_display }} / {{ document.get_status_display }}).
+  </p>
+{% endif %}
+
+<div class="module" style="margin-bottom:12px">
+  <h2>{% translate 'Images' %}</h2>
+  <div style="display:flex; gap:16px; flex-wrap:wrap">
+    <figure>
+      <figcaption>{% translate 'Front' %}</figcaption>
+      <a href="{% url 'admin:ops_identity_image_front' document.pk %}" target="_blank" rel="noopener">
+        <img src="{% url 'admin:ops_identity_image_front' document.pk %}" alt="{% translate 'Identity document front image' %}" style="max-height:320px; max-width:100%">
+      </a>
+    </figure>
+    {% if document.back_image_id %}
+      <figure>
+        <figcaption>{% translate 'Back' %}</figcaption>
+        <a href="{% url 'admin:ops_identity_image_back' document.pk %}" target="_blank" rel="noopener">
+          <img src="{% url 'admin:ops_identity_image_back' document.pk %}" alt="{% translate 'Identity document back image' %}" style="max-height:320px; max-width:100%">
+        </a>
+      </figure>
+    {% else %}
+      <p class="quiet">{% translate 'No back image' %}</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="module" style="margin-bottom:12px">
+  <h2>{% translate 'Patient' %}</h2>
+  <table>
+    <tr><th>{% translate 'Digital ID' %}</th><td>{{ patient.digital_id }}</td></tr>
+    <tr><th>{% translate 'Name' %}</th><td>{{ patient.full_name }}</td></tr>
+    <tr><th>{% translate 'Date of birth' %}</th><td>{{ patient.date_of_birth|date:"Y-m-d" }} ({{ patient.age }} {% translate 'years' %})</td></tr>
+    <tr><th>{% translate 'Age group' %}</th><td>{% if patient.is_minor %}{% translate 'Minor' %}{% else %}{% translate 'Adult' %}{% endif %}</td></tr>
+    <tr><th>{% translate 'Sex' %}</th><td>{{ patient.get_sex_display }}</td></tr>
+    <tr><th>{% translate 'Nationality' %}</th><td>{{ patient.nationality }}</td></tr>
+  </table>
+</div>
+
+<div class="module" style="margin-bottom:12px">
+  <h2>{% translate 'Document details' %}</h2>
+  <table>
+    <tr><th>{% translate 'Type' %}</th><td>{{ document.get_document_type_display }}</td></tr>
+    <tr><th>{% translate 'Issuing country' %}</th><td>{{ document.issuing_country }}</td></tr>
+    <tr><th>{% translate 'Issue date' %}</th><td>{{ document.issue_date|default:"&mdash;" }}</td></tr>
+    <tr><th>{% translate 'Expiry date' %}</th><td>{{ document.expiry_date|default:"&mdash;" }}</td></tr>
+    <tr><th>{% translate 'Document number' %}</th><td>{{ document.document_number }}</td></tr>
+    {% if document.national_number %}<tr><th>{% translate 'National number' %}</th><td>{{ document.national_number }}</td></tr>{% endif %}
+    {% if document.family_number %}<tr><th>{% translate 'Family number' %}</th><td>{{ document.family_number }}</td></tr>{% endif %}
+    {% if document.replaces %}
+      <tr><th>{% translate 'Replaces' %}</th><td>{{ document.replaces.document_type }} ({{ document.replaces.created_at|date:"Y-m-d H:i" }})</td></tr>
+    {% endif %}
+    {% if document.verification_status != 'PENDING' %}
+      <tr><th>{% translate 'Verified by' %}</th><td>{{ document.verified_by|default:"&mdash;" }}</td></tr>
+      <tr><th>{% translate 'Verified at' %}</th><td>{{ document.verified_at|date:"Y-m-d H:i"|default:"&mdash;" }}</td></tr>
+      {% if document.rejection_reason %}<tr><th>{% translate 'Rejection reason' %}</th><td>{{ document.rejection_reason }}</td></tr>{% endif %}
+    {% endif %}
+  </table>
+</div>
+
+{% if document.verification_status == 'PENDING' and document.status == 'CURRENT' %}
+  <div style="display:flex; gap:12px">
+    <form method="get" action="{% url 'admin:ops_verification_approve' document.pk %}">
+      <input type="submit" class="button" value="{% translate 'Approve identity' %}" style="background:#417690">
+    </form>
+    <form method="get" action="{% url 'admin:ops_verification_reject' document.pk %}">
+      <input type="submit" class="button" value="{% translate 'Reject identity' %}" style="background:#ba2121">
+    </form>
+  </div>
+{% endif %}
+
+<p><a href="{% url 'admin:ops_verification_queue' %}">&laquo; {% translate 'Back to queue' %}</a></p>
+{% endblock %}

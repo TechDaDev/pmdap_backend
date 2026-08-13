@@ -32,6 +32,9 @@ THIRD_PARTY_APPS = [
 ]
 
 PROJECT_APPS = [
+    # Must stay first so its admin.py replaces the default AdminSite before any
+    # other app registers its models with @admin.register.
+    "opsconsole.apps.OpsConsoleConfig",
     "accounts.apps.AccountsConfig",
     "patients.apps.PatientsConfig",
     "identities.apps.IdentitiesConfig",
@@ -270,6 +273,15 @@ CELERY_TASK_TIME_LIMIT = 30 * 60
 CELERY_BEAT_SCHEDULE = {
     "cleanup-identity-extraction-jobs": {
         "task": "identities.cleanup_identity_extraction_jobs",
+    # The Railway metrics collector is self-rescheduling (no beat process
+    # required); this entry only fires if a `celery beat` is deployed.
+    "ops-railway-collect-metrics": {
+        "task": "ops.railway.collect_metrics",
+        "schedule": max(
+            5, int(os.getenv("RAILWAY_METRICS_SAMPLE_SECONDS", "5"))
+        ),
+        "args": [],
+    },
         "schedule": int(os.getenv("IDENTITY_STAGING_SWEEP_SECONDS", str(15 * 60))),
         "args": [],
     },

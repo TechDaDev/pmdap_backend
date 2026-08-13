@@ -1,0 +1,54 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block title %}{% translate 'Railway server monitor' %} | {{ site_title|default:_('Django site admin') }}{% endblock %}
+
+{% block extrastyle %}
+  {{ block.super }}
+  <link rel="stylesheet" href="{% static 'admin/ops/css/monitor.css' %}">
+{% endblock %}
+
+{% block content %}
+<h1>{% translate 'Railway server monitor' %}</h1>
+<p class="quiet">{% translate 'Live CPU, memory, disk and network for all deployed services. Data is sampled server-side and refreshed every few seconds.' %}</p>
+
+{% if not configured %}
+  <div class="module" style="margin-bottom:12px">
+    <h2>{% translate 'Not configured' %}</h2>
+    <p class="errornote" style="margin:0">
+      {% translate 'The server monitor is not enabled. Set RAILWAY_METRICS_ENABLED=true and the related variables in the backend environment.' %}
+    </p>
+  </div>
+{% else %}
+  <div id="monitor-status" class="module" role="status" aria-live="polite" style="margin-bottom:12px">
+    <p id="monitor-status-text">{% translate 'Loading&hellip;' %}</p>
+  </div>
+
+  <div class="module" style="margin-bottom:12px">
+    <h2>{% translate 'Time window' %}</h2>
+    <div id="monitor-window" class="ops-window" role="group" aria-label="{% translate 'Time window' %}">
+      <button type="button" data-window="300"  class="ops-window-btn">5 min</button>
+      <button type="button" data-window="900"  class="ops-window-btn is-active">15 min</button>
+      <button type="button" data-window="1800" class="ops-window-btn">30 min</button>
+    </div>
+  </div>
+
+  <div id="monitor-services" class="ops-services"></div>
+{% endif %}
+
+<p><a href="{% url 'admin:index' %}">&laquo; {% translate 'Back to dashboard' %}</a></p>
+{% endblock %}
+
+{% block extrahead %}
+  {{ block.super }}
+  {% if configured %}
+    <script src="{% static 'admin/ops/vendor/chart.umd.min.js' %}"></script>
+    <script>
+      window.PMDAP_MONITOR = {
+        dataUrl: "{% url 'admin:ops_server_monitor_data' %}",
+        pollMs: 3000
+      };
+    </script>
+    <script src="{% static 'admin/ops/js/monitor.js' %}"></script>
+  {% endif %}
+{% endblock %}

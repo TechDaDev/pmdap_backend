@@ -1,0 +1,45 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block title %}{% translate 'Reject identity document' %} | {{ site_title|default:_('Django site admin') }}{% endblock %}
+
+{% block content %}
+<h1>{% translate 'Reject identity document' %}</h1>
+
+{% if messages %}
+  <ul class="messagelist">
+    {% for message in messages %}
+      <li class="{{ message.tags }}">{{ message|capfirst }}</li>
+    {% endfor %}
+  </ul>
+{% endif %}
+
+<div class="module" style="margin-bottom:12px">
+  <h2>{% translate 'Document' %}</h2>
+  <p>
+    {% blocktranslate with name=patient.full_name id=patient.digital_id type=document.get_document_type_display %}
+      {{ type }} submitted by {{ name }} ({{ id }}).
+    {% endblocktranslate %}
+  </p>
+</div>
+
+<form method="post" action="{% url 'admin:ops_verification_reject' document.pk %}">
+  {% csrf_token %}
+  <div class="module" style="margin-bottom:12px">
+    <h2>{% translate 'Reason for rejection' %}</h2>
+    <p>
+      <label for="id_reason">{% translate 'Reason' %} <span class="required">*</span></label>
+    </p>
+    <textarea id="id_reason" name="reason" rows="5" cols="80" required aria-required="true" autofocus placeholder="{% translate 'Describe why this document is being rejected' %}"></textarea>
+    {% if reason_required %}
+      <p class="errornote">{% translate 'A rejection reason is required.' %}</p>
+    {% endif %}
+  </div>
+  <div style="display:flex; gap:12px">
+    <input type="submit" class="button" value="{% translate 'Reject identity' %}" style="background:#ba2121">
+    <a class="button" href="{% url 'admin:ops_verification_review' document.pk %}">{% translate 'Cancel' %}</a>
+  </div>
+</form>
+
+<p><a href="{% url 'admin:ops_verification_queue' %}">&laquo; {% translate 'Back to queue' %}</a></p>
+{% endblock %}

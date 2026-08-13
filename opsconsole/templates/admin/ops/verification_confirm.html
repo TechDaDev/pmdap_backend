@@ -1,0 +1,36 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block title %}{% translate 'Confirm approval' %} | {{ site_title|default:_('Django site admin') }}{% endblock %}
+
+{% block content %}
+<h1>{% translate 'Confirm identity verification' %}</h1>
+
+{% if messages %}
+  <ul class="messagelist">
+    {% for message in messages %}
+      <li class="{{ message.tags }}">{{ message|capfirst }}</li>
+    {% endfor %}
+  </ul>
+{% endif %}
+
+<div class="module" style="margin-bottom:12px">
+  <h2>{% translate 'You are confirming' %}</h2>
+  <p>
+    {% blocktranslate with name=patient.full_name id=patient.digital_id type=document.get_document_type_display %}
+      The identity document ({{ type }}) submitted by {{ name }} ({{ id }}).
+    {% endblocktranslate %}
+  </p>
+  <p class="quiet">{% translate 'This marks the document as verified and, for a replacement, supersedes the previous document. This action is recorded in the audit log.' %}</p>
+</div>
+
+<form method="post" action="{% url 'admin:ops_verification_approve' document.pk %}">
+  {% csrf_token %}
+  <div style="display:flex; gap:12px">
+    <input type="submit" class="button" value="{% translate 'Approve identity' %}" style="background:#417690">
+    <a class="button" href="{% url 'admin:ops_verification_review' document.pk %}">{% translate 'Cancel' %}</a>
+  </div>
+</form>
+
+<p><a href="{% url 'admin:ops_verification_queue' %}">&laquo; {% translate 'Back to queue' %}</a></p>
+{% endblock %}

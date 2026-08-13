@@ -1,0 +1,50 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block title %}{% translate 'Identity verification queue' %} | {{ site_title|default:_('Django site admin') }}{% endblock %}
+
+{% block content %}
+<h1>{% translate 'Identity verification queue' %}</h1>
+<p class="quiet">{% blocktranslate %}Pending identity documents awaiting verification, oldest first. Numbers are not shown here.{% endblocktranslate %}</p>
+
+{% if messages %}
+  <ul class="messagelist">
+    {% for message in messages %}
+      <li class="{{ message.tags }}">{{ message|capfirst }}</li>
+    {% endfor %}
+  </ul>
+{% endif %}
+
+{% if documents %}
+<table id="result_list" style="width:100%">
+  <thead>
+    <tr>
+      <th scope="col">{% translate 'Submitted' %}</th>
+      <th scope="col">{% translate 'Digital ID' %}</th>
+      <th scope="col">{% translate 'Name' %}</th>
+      <th scope="col">{% translate 'Type' %}</th>
+      <th scope="col">{% translate 'Replacement' %}</th>
+      <th scope="col">{% translate 'Age group' %}</th>
+      <th scope="col"></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in documents %}
+      <tr>
+        <td>{{ row.created_at|date:"Y-m-d H:i" }}</td>
+        <td><a href="{% url 'admin:ops_verification_review' row.pk %}">{{ row.patient.digital_id }}</a></td>
+        <td>{{ row.patient.full_name }}</td>
+        <td>{{ row.get_document_type_display }}</td>
+        <td>{% if row.replaces %}{% translate 'Replacement' %}{% else %}&mdash;{% endif %}</td>
+        <td>{% if row.patient.is_minor %}{% translate 'Minor' %}{% else %}{% translate 'Adult' %}{% endif %}</td>
+        <td><a class="button" href="{% url 'admin:ops_verification_review' row.pk %}">{% translate 'Review' %}</a></td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+  <p>{% translate 'No pending identity documents.' %}</p>
+{% endif %}
+
+<p><a href="{% url 'admin:index' %}">&laquo; {% translate 'Back to dashboard' %}</a></p>
+{% endblock %}
