@@ -187,7 +187,9 @@ class RailwayMetricsClient:
             return {}
         start_iso = start_dt.isoformat()
         end_iso = end_dt.isoformat()
-        quoted = ",".join('"%s"' % m for m in measurements)
+        # MetricMeasurement is a GraphQL enum: values must be bare identifiers
+        # (NOT quoted strings) when inlined as literals in the query text.
+        enum_list = ",".join(measurements)
         env_part = ""
         if self.environment_id:
             env_part = ',environmentId:"%s"' % self.environment_id
@@ -201,7 +203,7 @@ class RailwayMetricsClient:
                     json_quote(svc["id"]),
                     json_quote(start_iso),
                     json_quote(end_iso),
-                    quoted,
+                    enum_list,
                     int(sample_rate_seconds),
                     env_part,
                 )
