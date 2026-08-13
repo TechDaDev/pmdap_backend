@@ -61,16 +61,27 @@ so no `celery beat` process is required. A Redis `SETNX` chain guard
 web/worker processes.
 
 **Upstream client** (`opsconsole/railway_client.py`) talks to
-`https://backboard.railway.com/graphql/v2` with `Bearer` (account token) or
-`Project-Access-Token` auth, verified by live introspection:
+`https://backboard.railway.com/graphql/v2` with `Bearer` (account or API token)
+or `Project-Access-Token` auth, verified by live introspection:
 
 - `Query.project(id: String!)` -> `services { edges { node { id name } } }`
 - `Query.metrics(serviceId, startDate, endDate, measurements, sampleRateSeconds)`
   -> one `MetricsResult` per measurement, in request order, with
   `values { ts (epoch s) value (Float) }`.
-- All services are fetched in **one** request using GraphQL aliases.
+- Services are fetched **sequentially** (one HTTP call each): Railway enforces
+  max 19 concurrent metric queries per client and counts every measurement in a
+  call as one query, so a batched alias query (4 services x 5 measurements = 20)
+  exceeded the limit. Sequential fetches stay at 5 concurrent.
+- `sampleRateSeconds` must be >= 30 (lower values return "Invalid input").
+- `MetricMeasurement` enum values are inlined as bare identifiers (not quoted
+  strings) in query text.
 - Units: CPU in vCPU, memory/disk in GB, network in cumulative GB (rate derived
   client-side).
+- The API is behind Cloudflare: a browser `User-Agent` is required (the urllib
+  default UA is blocked with HTTP 403 error 1010).
+- The account token from `~/.railway/config.json` is IP-allowlisted (rejected
+  from Railway egress); use a workspace API token created via the
+  `apiTokenCreate` GraphQL mutation instead.
 
 **Buffer** (`opsconsole/buffer.py`) keeps a capped Redis rolling list per
 service x metric (`pmdap:ops:railway:metrics:<svc>:<metric>`), retention
@@ -101,11 +112,11 @@ colour-only) and a stale indicator.
 
 ```
 RAILWAY_METRICS_ENABLED=true
-RAILWAY_METRICS_TOKEN=<account or project token>
+RAILWAY_METRICS_TOKEN=<workspace API or project token>
 RAILWAY_METRICS_TOKEN_TYPE=bearer|project
 RAILWAY_METRICS_PROJECT_ID=8610197a-...
 RAILWAY_METRICS_ENVIRONMENT_ID=ad64bcc8-...
-RAILWAY_METRICS_SAMPLE_SECONDS=5
+RAILWAY_METRICS_SAMPLE_SECONDS=30
 RAILWAY_METRICS_RETENTION_SECONDS=1800
 ```
 
