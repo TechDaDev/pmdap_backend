@@ -54,7 +54,20 @@ class ExtractedIdentityFieldSerializer(serializers.Serializer):
     value = serializers.CharField(allow_null=True, required=False)
     confidence = serializers.FloatField(min_value=0.0, max_value=1.0)
     source = serializers.ChoiceField(
-        choices=("MRZ", "OCR", "DOCUMENT_TYPE", "DERIVED")
+        choices=(
+            "MRZ",
+            "OCR",
+            "DOCUMENT_TYPE",
+            "DERIVED",
+            "FRONT_PRINTED",
+            "BACK_PRINTED",
+            "ROI",
+        )
+    )
+    cross_check = serializers.ChoiceField(
+        choices=("MRZ_AGREE", "MRZ_MISMATCH"),
+        required=False,
+        allow_null=True,
     )
 
 

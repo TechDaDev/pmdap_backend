@@ -12,6 +12,8 @@ import os
 import re
 import threading
 
+from django.utils import timezone
+
 from identities import mrz
 
 logger = logging.getLogger(__name__)
@@ -90,11 +92,248 @@ def ocr_text(image_path: str) -> list[str]:
 
 
 _DATE_RE = re.compile(r"\b((?:19|20)\d{2})[-/.](\d{1,2})[-/.](\d{1,2})\b")
-_NATIONAL_RE = re.compile(r"\b\d{15}\b")
-_DOC_NUMBER_RE = re.compile(r"\b[A-Z0-9]{6,12}\b")
-_FAMILY_RE = re.compile(r"\b\d{3,5}\b")
 _ISSUE_LABELS = ("issue date", "date of issue", "issued on", "date issued")
 _MRZ_LINES = re.compile(r"^[A-Z0-9<]{30,44}$")
+
+# --- Iraqi National Card profile-field extraction ---------------------------
+# Additive sources for the card path; the public serializer keeps the original
+# MRZ/OCR/DOCUMENT_TYPE/DERIVED choices and gains these new ones.
+SRC_FRONT = "FRONT_PRINTED"
+SRC_BACK = "BACK_PRINTED"
+SRC_ROI = "ROI"
+
+# Additive warning codes for the card path.
+W_SOURCE_MISMATCH = "SOURCE_MISMATCH"
+W_OCR_NORMALIZED = "OCR_CHARACTER_NORMALIZED"
+W_FAMILY_NOT_FOUND = "FAMILY_NUMBER_NOT_FOUND"
+W_BLOOD_GROUP_NOT_FOUND = "BLOOD_GROUP_NOT_FOUND"
+W_FIELD_MISSING = "FIELD_MISSING"
+W_MRZ_PARTIAL = "MRZ_PARTIAL"
+
+_VALID_BLOOD_GROUPS = frozenset({"A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"})
+# OCR-confusable letters mapped to digits ONLY where a numeric format is
+# required (the card number). Never applied to names or the H... body number.
+_CARD_CONFUSABLES = {"O": "0", "I": "1", "l": "1", "S": "5", "B": "8"}
+
+# Arabic label anchors (matched on a lightly normalized form).
+_NAME_LABELS = ("الاسم", "اناو")
+_FATHER_LABELS = ("الاب", "اباوك", "ابت")
+_GRANDFATHER_LABELS = ("ابير", "ابابير", "الحد", "الجد")
+_MOTHER_LABELS = ("الام", "ادايك", "داتك")
+_SEX_LABELS = ("الجنس", "اركمز", "اركز")
+_FAMILY_LABELS = (
+    "الرقم العائلي",
+    "الرقم العائلى",
+    "العائلي",
+    "العائلى",
+    "خيرائى",
+    "خاني",
+)
+_CONNECTOR_TOKENS = frozenset({"اناو", "اتو", "ناو", "انازناو", "اركمز", "اركز"})
+
+_HAMZA_MAP = str.maketrans("أإآٱ", "اااا")
+_HARAKAT = "\u0640\u064B\u064C\u064D\u064E\u064F\u0650\u0651\u0652"
+_HIDDEN = "\u200c\u200d\u200f\u200e"
+
+_CARD_NUMBER_RE = re.compile(r"\b[0-9]{10,13}[A-Z0-9]?\b")
+_BODY_NUMBER_RE = re.compile(r"\bH\d{6,12}\b")
+# No trailing \b: "+"/"-" are non-word chars, so a trailing boundary can never
+# match at end-of-line. \b at the start keeps "1O+" / embedded letters out.
+_BLOOD_RE = re.compile(r"\b([ABO]{1,2})\s*([+-])")
+_FAMILY_RE = re.compile(r"[A-Z0-9]{10,}")
+
+
+class SideLine:
+    """OCR line tagged with its source side/region for card extraction.
+
+    ``side`` is one of "FRONT" / "BACK" (full-card Arabic OCR) or an ROI tag
+    such as "ROI_BLOOD" / "ROI_DATES" / "ROI_DOB" / "ROI_FAMILY" / "ROI_MRZ".
+    """
+
+    __slots__ = ("side", "text", "confidence")
+
+    def __init__(self, side: str, text: str, confidence: float = 0.0):
+        self.side = side
+        self.text = text
+        self.confidence = confidence
+
+
+def _norm_ar(text: str) -> str:
+    """Conservative Arabic normalization for LABEL matching (never values)."""
+    text = text.translate(_HAMZA_MAP)
+    for ch in _HARAKAT + _HIDDEN:
+        text = text.replace(ch, "")
+    return text
+
+
+def _contains_any(line: str, labels) -> bool:
+    norm = _norm_ar(line)
+    return any(label in norm for label in labels)
+
+
+def _strip_labels(line: str, labels) -> str:
+    """Remove the leading Arabic label/connector tokens, keep the value."""
+    norm = _norm_ar(line)
+    for label in sorted(labels, key=len, reverse=True):
+        norm = norm.replace(label, "", 1)
+    norm = norm.replace(":", " ").replace("|", " ")
+    tokens = [t for t in norm.split() if t and t not in _CONNECTOR_TOKENS]
+    return " ".join(tokens)
+
+
+def _match_front_field(front, labels):
+    """Return (value, confidence) for the first FRONT line carrying a label."""
+    for text, conf in front:
+        if _contains_any(text, labels):
+            value = _strip_labels(text, labels)
+            if value:
+                return value, conf
+    return None, 0.0
+
+
+def _match_paternal_grandfather(front):
+    """Paternal grandfather from the FRONT name chain.
+
+    Rule: first grandfather-labeled value that appears before the mother
+    section (mother label). The card lists father then paternal grandfather
+    then لقب / mother / maternal grandfather; only the pre-mother entry is
+    used so the maternal grandfather is never picked.
+    """
+    for text, conf in front:
+        if _contains_any(text, _MOTHER_LABELS):
+            break
+        if _contains_any(text, _GRANDFATHER_LABELS):
+            value = _strip_labels(text, _GRANDFATHER_LABELS)
+            if value:
+                return value, conf
+    return None, 0.0
+
+
+def _clamp_conf(confidence: float, default: float = 0.7) -> float:
+    if not confidence or confidence <= 0:
+        return default
+    return round(min(max(confidence, 0.0), 1.0), 3)
+
+
+def _canonical_sex(value: str) -> str | None:
+    norm = _norm_ar(value)
+    if "ذكر" in norm:
+        return "MALE"
+    if any(t in norm for t in ("أنثى", "انثى", "انثئ")):
+        return "FEMALE"
+    return None
+
+
+def _parse_date_str(text: str) -> str | None:
+    m = _DATE_RE.search(text)
+    if not m:
+        return None
+    year, month, day = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    if month < 1 or month > 12 or day < 1 or day > 31:
+        return None
+    return f"{year:04d}-{month:02d}-{day:02d}"
+
+
+def _extract_dates(lines) -> list[str]:
+    out: list[str] = []
+    for text, _ in lines:
+        value = _parse_date_str(text)
+        if value:
+            out.append(value)
+    return out
+
+
+def _extract_dob(roi_dob) -> str | None:
+    """Date of birth = oldest non-future date in the DOB ROI."""
+    today = timezone.localdate().isoformat()
+    past = [d for d in _extract_dates(roi_dob) if d <= today]
+    return min(past) if past else None
+
+
+def _extract_issue_expiry(roi_dates):
+    today = timezone.localdate().isoformat()
+    past, future = [], []
+    for d in _extract_dates(roi_dates):
+        (future if d > today else past).append(d)
+    issue = max(past) if past else None
+    expiry = min(future) if future else None
+    return issue, expiry
+
+
+def _extract_blood_group(roi_blood) -> str | None:
+    for text, _ in roi_blood:
+        candidate = text.replace("0", "O")
+        m = _BLOOD_RE.search(candidate)
+        if m:
+            group = m.group(1).upper() + m.group(2)
+            if group in _VALID_BLOOD_GROUPS:
+                return group
+    return None
+
+
+def _normalize_card_confusables(value: str) -> tuple[str, bool]:
+    out, changed = [], False
+    for ch in value:
+        if ch in _CARD_CONFUSABLES:
+            out.append(_CARD_CONFUSABLES[ch])
+            changed = True
+        else:
+            out.append(ch)
+    return "".join(out), changed
+
+
+def _extract_card_number(front):
+    """Visible national/card number from the FRONT (numeric slot only).
+
+    Returns (value, confidence, normalized). Confusable letters are rewritten
+    to digits only when the resulting value becomes purely numeric.
+    """
+    for text, conf in front:
+        for m in _CARD_NUMBER_RE.finditer(text.upper()):
+            value = m.group(0)
+            if value.startswith("H") or len(value) < 10:
+                continue
+            normed, changed = _normalize_card_confusables(value)
+            if normed.isdigit():
+                return normed, conf, changed
+            # Non-confusable letters remain -> not a reliable numeric slot.
+    return None, 0.0, False
+
+
+def _extract_body_number(front) -> str | None:
+    for text, _ in front:
+        m = _BODY_NUMBER_RE.search(text.upper())
+        if m:
+            return m.group(0)
+    return None
+
+
+def _extract_family_number(roi_family, back, body_number):
+    """Family number from the BACK printed region (long alphanumeric run).
+
+    Only labeled/long-form candidates qualify. Short digit groups and MRZ
+    noise are never accepted; MISSING is safer than WRONG. The H... body
+    number is explicitly excluded.
+    """
+    candidates: list[str] = []
+    for text, _ in roi_family:
+        for m in _FAMILY_RE.finditer(text.upper()):
+            cand = m.group(0)
+            if "/" in cand or "-" in cand or cand == body_number:
+                continue
+            candidates.append(cand)
+    if not candidates:
+        for text, _ in back:
+            if not _contains_any(text, _FAMILY_LABELS):
+                continue
+            for m in _FAMILY_RE.finditer(text.upper()):
+                cand = m.group(0)
+                if "/" in cand or "-" in cand or cand == body_number:
+                    continue
+                candidates.append(cand)
+    if not candidates:
+        return None
+    return max(set(candidates), key=len)
 
 
 def _mrz_lines(lines: list[str]) -> list[str]:
@@ -120,12 +359,20 @@ def _date_from(m: re.Match) -> str:
     return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
 
 
-def _candidate(value: str | None, confidence: float, source: str) -> dict:
-    return {
+def _candidate(
+    value: str | None,
+    confidence: float,
+    source: str,
+    cross_check: str | None = None,
+) -> dict:
+    result = {
         "value": value,
         "confidence": round(min(max(confidence, 0.0), 1.0), 3),
         "source": source,
     }
+    if cross_check:
+        result["cross_check"] = cross_check
+    return result
 
 
 def extract_passport(lines: list[str]) -> tuple[dict, list[str]]:
@@ -152,59 +399,234 @@ def extract_passport(lines: list[str]) -> tuple[dict, list[str]]:
     return fields, warnings
 
 
-def extract_national_card(lines: list[str]) -> tuple[dict, list[str]]:
+def extract_iraqi_national_card(
+    side_lines: list[SideLine],
+) -> tuple[dict, list[str], mrz.MrzResult]:
+    """Side-aware deterministic extraction for the Iraqi Unified National Card.
+
+    Consumes side/ROI-tagged OCR lines (FRONT / BACK full-card Arabic OCR plus
+    targeted ROI reads) and an MRZ pass, then builds the profile fields with
+    source attribution and cross-checks. Never returns raw OCR text.
+    """
     fields: dict[str, dict] = {}
     warnings: list[str] = []
 
+    front: list[tuple[str, float]] = []
+    back: list[tuple[str, float]] = []
+    roi: dict[str, list[tuple[str, float]]] = {}
+    back_texts: list[str] = []
+    roi_mrz_texts: list[str] = []
+
+    for line in side_lines:
+        if not line.text:
+            continue
+        if line.side == "FRONT":
+            front.append((line.text, line.confidence))
+        elif line.side == "BACK":
+            back.append((line.text, line.confidence))
+            back_texts.append(line.text)
+        else:
+            roi.setdefault(line.side, []).append((line.text, line.confidence))
+            if line.side == "ROI_MRZ":
+                roi_mrz_texts.append(line.text)
+
+    # ROI (Latin) MRZ lines first: they read line 3 cleanly; the Arabic back
+    # lines remain as a fallback for line 1/2.
+    mrz_input = list(roi_mrz_texts) + list(back_texts)
+
     fields["issuing_country"] = _candidate("IQ", 1.0, SRC_DOCUMENT_TYPE)
 
-    joined = "\n".join(lines).upper()
-    nat = _NATIONAL_RE.search(joined)
-    if nat:
-        fields["national_number"] = _candidate(nat.group(0), 0.7, SRC_OCR)
+    # ---- MRZ (Iraqi card layout) ----
+    mrz_result = mrz.parse_iraqi_national_card_mrz(mrz_input)
+    if not mrz_result.detected:
+        warnings.append(W_MRZ_NOT_DETECTED)
+    elif not mrz_result.checks_passed or "MRZ_PARTIAL" in mrz_result.warnings:
+        warnings.append(W_MRZ_PARTIAL)
+
+    # ---- name / father / grandfather (FRONT labels) ----
+    name_value, name_conf = _match_front_field(front, _NAME_LABELS)
+    if name_value:
+        fields["name"] = _candidate(name_value, _clamp_conf(name_conf), SRC_FRONT)
     else:
-        warnings.append(W_FIELD_NOT_FOUND)
+        warnings.append(W_FIELD_MISSING)
 
-    # Family number: short numeric run not part of the national number.
-    family = _FAMILY_RE.search(joined)
-    if family:
-        fields["family_number"] = _candidate(family.group(0), 0.55, SRC_OCR)
+    father_value, father_conf = _match_front_field(front, _FATHER_LABELS)
+    if father_value:
+        fields["father_name"] = _candidate(
+            father_value, _clamp_conf(father_conf), SRC_FRONT
+        )
     else:
-        warnings.append(W_FIELD_NOT_FOUND)
+        warnings.append(W_FIELD_MISSING)
 
-    doc = _DOC_NUMBER_RE.search(joined)
-    if doc and doc.group(0) not in {nat.group(0) if nat else ""}:
-        fields["document_number"] = _candidate(doc.group(0), 0.5, SRC_OCR)
+    grandfather_value, grandfather_conf = _match_paternal_grandfather(front)
+    if grandfather_value:
+        fields["grandfather_name"] = _candidate(
+            grandfather_value, _clamp_conf(grandfather_conf), SRC_FRONT
+        )
     else:
-        warnings.append(W_FIELD_NOT_FOUND)
+        warnings.append(W_FIELD_MISSING)
 
-    return fields, warnings
+    # ---- sex (FRONT printed + MRZ cross-check) ----
+    sex_value, sex_conf = _match_front_field(front, _SEX_LABELS)
+    sex = _canonical_sex(sex_value) if sex_value else None
+    mrz_sex = mrz_result.sex
+    if sex and mrz_sex:
+        agree = sex == ("MALE" if mrz_sex == "M" else "FEMALE")
+        fields["sex"] = _candidate(
+            sex,
+            0.96 if agree else 0.45,
+            SRC_FRONT,
+            cross_check="MRZ_AGREE" if agree else "MRZ_MISMATCH",
+        )
+        if not agree:
+            warnings.append(W_SOURCE_MISMATCH)
+    elif sex:
+        fields["sex"] = _candidate(sex, _clamp_conf(sex_conf, 0.9), SRC_FRONT)
+    elif mrz_sex:
+        fields["sex"] = _candidate(
+            "MALE" if mrz_sex == "M" else "FEMALE", 0.9, SRC_MRZ
+        )
+    else:
+        warnings.append(W_FIELD_MISSING)
+
+    # ---- blood group (FRONT targeted ROI) ----
+    blood = _extract_blood_group(roi.get("ROI_BLOOD", []))
+    if blood:
+        fields["blood_group"] = _candidate(blood, 0.82, SRC_ROI)
+    else:
+        warnings.append(W_BLOOD_GROUP_NOT_FOUND)
+
+    # ---- national / card number (FRONT) + document_number alias ----
+    card_value, card_conf, normalized = _extract_card_number(front)
+    if card_value:
+        conf = _clamp_conf(card_conf, 0.7)
+        if normalized:
+            conf = round(max(conf - 0.15, 0.3), 3)
+            warnings.append(W_OCR_NORMALIZED)
+        fields["national_card_number"] = _candidate(card_value, conf, SRC_FRONT)
+        # Compatibility alias: IdentityDocument persists this in
+        # document_number today. Schema unchanged this milestone.
+        fields["document_number"] = _candidate(card_value, conf, SRC_FRONT)
+    else:
+        warnings.append(W_FIELD_MISSING)
+
+    # ---- unique card body number (FRONT) with MRZ cross-check ----
+    body_value = _extract_body_number(front)
+    if body_value:
+        body_conf = 0.9
+        cross = None
+        mrz_doc = mrz_result.document_number
+        if mrz_doc:
+            if mrz_doc == body_value:
+                body_conf = 0.95
+                cross = "MRZ_AGREE"
+            elif mrz_doc.startswith("H"):
+                warnings.append(W_SOURCE_MISMATCH)
+        fields["unique_card_body_number"] = _candidate(
+            body_value, body_conf, SRC_FRONT, cross_check=cross
+        )
+    else:
+        warnings.append(W_FIELD_MISSING)
+
+    # ---- date of birth (BACK printed + MRZ) ----
+    dob_printed = _extract_dob(roi.get("ROI_DOB", []))
+    mrz_dob = (
+        mrz_result.date_of_birth.isoformat() if mrz_result.date_of_birth else None
+    )
+    dob_mrz_low = "date_of_birth" in mrz_result.low_confidence_fields
+    if dob_printed and mrz_dob:
+        if dob_printed == mrz_dob:
+            fields["date_of_birth"] = _candidate(
+                dob_printed, 0.94, SRC_BACK, cross_check="MRZ_AGREE"
+            )
+        else:
+            fields["date_of_birth"] = _candidate(
+                dob_printed, 0.45, SRC_BACK, cross_check="MRZ_MISMATCH"
+            )
+            warnings.append(W_SOURCE_MISMATCH)
+    elif dob_printed:
+        fields["date_of_birth"] = _candidate(dob_printed, 0.85, SRC_BACK)
+    elif mrz_dob:
+        fields["date_of_birth"] = _candidate(
+            mrz_dob, 0.8 if not dob_mrz_low else 0.55, SRC_MRZ
+        )
+    else:
+        warnings.append(W_FIELD_MISSING)
+
+    # ---- issue / expiry (BACK printed; expiry cross-checked with MRZ) ----
+    issue_value, expiry_printed = _extract_issue_expiry(roi.get("ROI_DATES", []))
+    if issue_value:
+        fields["issue_date"] = _candidate(issue_value, 0.7, SRC_BACK)
+    expiry_mrz = (
+        mrz_result.expiry_date.isoformat() if mrz_result.expiry_date else None
+    )
+    if expiry_mrz and expiry_printed:
+        if expiry_mrz == expiry_printed:
+            fields["expiry_date"] = _candidate(
+                expiry_mrz, 0.94, SRC_MRZ, cross_check="MRZ_AGREE"
+            )
+        else:
+            # MRZ is check-digit validated; prefer it over a truncated printed
+            # read rather than emitting a plausible-looking wrong value.
+            fields["expiry_date"] = _candidate(
+                expiry_mrz, 0.65, SRC_MRZ, cross_check="MRZ_MISMATCH"
+            )
+            warnings.append(W_SOURCE_MISMATCH)
+    elif expiry_mrz:
+        fields["expiry_date"] = _candidate(expiry_mrz, 0.85, SRC_MRZ)
+    elif expiry_printed:
+        fields["expiry_date"] = _candidate(expiry_printed, 0.7, SRC_BACK)
+
+    # ---- family number (BACK printed; MISSING safer than WRONG) ----
+    family_value = _extract_family_number(
+        roi.get("ROI_FAMILY", []), back, body_value
+    )
+    if family_value:
+        fields["family_number"] = _candidate(family_value, 0.85, SRC_BACK)
+    else:
+        warnings.append(W_FAMILY_NOT_FOUND)
+
+    return fields, warnings, mrz_result
 
 
-def extract_identity(document_type: str, lines: list[str]) -> tuple[dict, list[str], dict]:
-    """Run deterministic extraction. Returns (fields, warnings, mrz_summary)."""
+def extract_identity(
+    document_type: str, lines
+) -> tuple[dict, list[str], dict]:
+    """Run deterministic extraction. Returns (fields, warnings, mrz_summary).
+
+    ``lines`` accepts either a list of plain strings (legacy: each line is
+    treated as FRONT) or a list of SideLine objects (side/ROI tagged).
+    """
     if not lines:
         warnings = [W_NO_TEXT] if _load_ocr() is not None else [W_OCR_UNAVAILABLE]
         return {}, warnings, {"detected": False, "valid": False, "checks_passed": False}
 
+    if not isinstance(lines[0], SideLine):
+        lines = [SideLine("FRONT", text) for text in lines]
+
     if document_type == "PASSPORT":
-        fields, warnings = extract_passport(lines)
+        text_lines = [line.text for line in lines]
+        fields, warnings = extract_passport(text_lines)
+        mrz_lines = _mrz_lines(text_lines)
+        result = mrz.parse_mrz(mrz_lines) if mrz_lines else mrz.MrzResult()
+        mrz_summary = {
+            "detected": result.detected,
+            "valid": result.valid,
+            "checks_passed": result.checks_passed,
+        }
     elif document_type == "UNIFIED_NATIONAL_CARD":
-        fields, warnings = extract_national_card(lines)
+        fields, warnings, result = extract_iraqi_national_card(lines)
+        mrz_summary = {
+            "detected": result.detected,
+            "valid": result.valid,
+            "checks_passed": result.checks_passed,
+        }
     else:
         return {}, [W_UNSUPPORTED_LAYOUT], {
             "detected": False,
             "valid": False,
             "checks_passed": False,
         }
-
-    mrz_lines = _mrz_lines(lines)
-    result = mrz.parse_mrz(mrz_lines) if mrz_lines else mrz.MrzResult()
-    mrz_summary = {
-        "detected": result.detected,
-        "valid": result.valid,
-        "checks_passed": result.checks_passed,
-    }
     return fields, warnings, mrz_summary
 
 

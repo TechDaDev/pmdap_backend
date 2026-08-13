@@ -177,6 +177,99 @@ def parse_mrz(lines: list[str]) -> MrzResult:
     return result
 
 
+_ARABIC_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+
+
+def _sanitize_mrz(line: str) -> str:
+    """Keep only MRZ-safe ASCII chars; fold Arabic-Indic digits to Latin."""
+    line = line.translate(_ARABIC_DIGITS)
+    return "".join(ch for ch in line if ch in _MRZ_CHARS)
+
+
+def parse_iraqi_national_card_mrz(lines: list[str]) -> MrzResult:
+    """Parse the Iraqi Unified National Card MRZ (dedicated layout).
+
+    Observed real-card layout (verified locally):
+      line1: "ID" + "IRQ" + body/card number (pos 5..13) + check (14) + optional
+      line2: DOB YYMMDD (pos 0..5) + check (6) + sex M/F (7) +
+             expiry YYMMDD (pos 8..13) + check (14) + nationality (15..17)
+      line3: transliterated Latin name (diagnostic only, optional)
+
+    The generic ICAO TD1 layout does NOT match this card (DOB/sex/expiry live in
+    line2 here, not line3/line1). This parser classifies lines by content so
+    line3 may be absent (common with the Arabic OCR model) without losing the
+    fields that matter.
+    """
+    result = MrzResult(detected=False, document_type="ID")
+    line1 = line2 = line3 = None
+    for raw in lines:
+        ln = _sanitize_mrz(raw)
+        if not ln:
+            continue
+        if len(ln) >= 14 and ln.startswith("ID") and line1 is None:
+            line1 = ln[:30]
+        elif (
+            len(ln) >= 18
+            and ln[:6].isdigit()
+            and ln[6].isdigit()
+            and ln[7] in "MF"
+            and line2 is None
+        ):
+            line2 = ln[:30]
+        elif line3 is None:
+            line3 = ln
+
+    if line1 is None and line2 is None:
+        result.warnings.append("MRZ_NOT_DETECTED")
+        return result
+
+    result.detected = True
+    checks: list[bool] = []
+
+    if line1 is not None:
+        result.issuing_country = line1[2:5].replace("<", "") or None
+        doc = line1[5:14]
+        cd = line1[14] if len(line1) > 14 else "<"
+        result.document_number = normalize_field(doc) or None
+        if cd != "<" and doc.strip("<"):
+            ok = str(check_digit(doc)) == cd
+            checks.append(ok)
+            if not ok:
+                result.low_confidence_fields.append("document_number")
+                result.warnings.append("MRZ_CHECK_FAILED")
+
+    if line2 is not None:
+        dob = normalize_dob(line2[0:2], line2[2:4], line2[4:6])
+        result.date_of_birth = dob
+        if dob is not None and len(line2) > 6 and line2[6] != "<":
+            ok = str(check_digit(line2[0:6])) == line2[6]
+            checks.append(ok)
+            if not ok:
+                result.low_confidence_fields.append("date_of_birth")
+                result.warnings.append("MRZ_CHECK_FAILED")
+        result.sex = line2[7] if len(line2) > 7 and line2[7] in "MF" else None
+        expiry = normalize_dob(line2[8:10], line2[10:12], line2[12:14])
+        result.expiry_date = expiry
+        if expiry is not None and len(line2) > 14 and line2[14] != "<":
+            ok = str(check_digit(line2[8:14])) == line2[14]
+            checks.append(ok)
+            if not ok:
+                result.low_confidence_fields.append("expiry_date")
+                result.warnings.append("MRZ_CHECK_FAILED")
+        result.nationality = line2[15:18].replace("<", "") or None
+
+    if line3:
+        result.name = normalize_field(line3) or None
+
+    if line3 is None:
+        result.warnings.append("MRZ_PARTIAL")
+    result.checks_passed = bool(checks) and all(checks) if checks else False
+    result.valid = (
+        result.checks_passed and line1 is not None and line2 is not None
+    )
+    return result
+
+
 def _date_str(value: date | None) -> str | None:
     return value.isoformat() if value else None
 
