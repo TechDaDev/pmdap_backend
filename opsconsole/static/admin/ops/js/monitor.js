@@ -195,15 +195,25 @@
     }
   }
 
-  document.getElementById("monitor-window").addEventListener("click", function (e) {
-    var btn = e.target.closest(".ops-window-btn");
-    if (!btn) return;
-    windowSeconds = parseInt(btn.getAttribute("data-window"), 10);
-    document.querySelectorAll(".ops-window-btn").forEach(function (b) { b.classList.remove("is-active"); });
-    btn.classList.add("is-active");
-    if (lastData) render(lastData);
-  });
+  function init() {
+    var windowEl = document.getElementById("monitor-window");
+    if (windowEl) {
+      windowEl.addEventListener("click", function (e) {
+        var btn = e.target.closest(".ops-window-btn");
+        if (!btn) return;
+        windowSeconds = parseInt(btn.getAttribute("data-window"), 10);
+        document.querySelectorAll(".ops-window-btn").forEach(function (b) { b.classList.remove("is-active"); });
+        btn.classList.add("is-active");
+        if (lastData) render(lastData);
+      });
+    }
+    document.addEventListener("visibilitychange", visibilityChanged);
+    visibilityChanged();
+  }
 
-  document.addEventListener("visibilitychange", visibilityChanged);
-  visibilityChanged();
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
 })();

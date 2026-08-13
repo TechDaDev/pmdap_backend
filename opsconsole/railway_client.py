@@ -35,6 +35,13 @@ RAILWAY_GRAPHQL_URL = os.getenv(
     "RAILWAY_GRAPHQL_URL", "https://backboard.railway.com/graphql/v2"
 )
 
+# Cloudflare in front of backboard returns HTTP 403 (error 1010) for the
+# default urllib user-agent, so send a standard browser signature.
+_USER_AGENT = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+)
+
 # Metric names the monitor charts. Units are documented next to each constant.
 CPU_USAGE = "CPU_USAGE"  # vCPU
 MEMORY_USAGE_GB = "MEMORY_USAGE_GB"  # GiB
@@ -91,7 +98,11 @@ class RailwayMetricsClient:
         return os.getenv("RAILWAY_METRICS_ENABLED", "").strip().lower() == "true"
 
     def _headers(self):
-        headers = {"Content-Type": "application/json", "Accept": "application/json"}
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": _USER_AGENT,
+        }
         if self.token_type == "project":
             headers["Project-Access-Token"] = self.token
         elif self.token:

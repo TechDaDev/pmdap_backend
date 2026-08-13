@@ -244,6 +244,8 @@ class TestRailwayClientErrorMapping:
     def _patch_urlopen(self, monkeypatch, exc=None, status=200, body="{}"):
         import urllib.error
 
+        captured = {}
+
         class FakeResponse:
             def __init__(self, status):
                 self.status = status
@@ -258,6 +260,7 @@ class TestRailwayClientErrorMapping:
                 return body.encode()
 
         def fake_urlopen(request, timeout=20):
+            captured["headers"] = dict(request.headers)
             if exc:
                 raise exc
             return FakeResponse(status)
@@ -265,6 +268,7 @@ class TestRailwayClientErrorMapping:
         monkeypatch.setattr(
             "opsconsole.railway_client.urllib.request.urlopen", fake_urlopen
         )
+        return captured
 
     def test_missing_token_config_error(self, monkeypatch):
         from opsconsole.railway_client import RailwayMetricsClient, RailwayMetricsError
@@ -326,6 +330,25 @@ class TestRailwayClientErrorMapping:
         with pytest.raises(RailwayMetricsError) as exc:
             self._make_client()._post("q", {})
         assert exc.value.code == "UPSTREAM_ERROR"
+
+    def test_sends_browser_user_agent(self, monkeypatch):
+        captured = self._patch_urlopen(monkeypatch)
+        self._make_client()._post("q", {})
+        headers = {k.lower(): v for k, v in captured["headers"].items()}
+        ua = headers.get("user-agent", "")
+        # Cloudflare blocks the urllib default UA (403 error 1010).
+        assert "Python-urllib" not in ua
+        assert "Mozilla/5.0" in ua
+
+    def test_project_token_type_header(self, monkeypatch):
+        from opsconsole.railway_client import RailwayMetricsClient
+
+        captured = self._patch_urlopen(monkeypatch)
+        client = RailwayMetricsClient(token="pat", token_type="project")
+        client._post("q", {})
+        headers = {k.lower(): v for k, v in captured["headers"].items()}
+        assert headers.get("project-access-token") == "pat"
+        assert "authorization" not in headers
 
 
 class TestDataEndpoint:
