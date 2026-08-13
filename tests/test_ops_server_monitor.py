@@ -231,6 +231,103 @@ class TestBuffer:
         assert len(series) == 100
 
 
+class TestRailwayClientErrorMapping:
+    """Error-mapping unit tests for the urllib-based GraphQL client."""
+
+    def _make_client(self):
+        from opsconsole.railway_client import RailwayMetricsClient
+
+        return RailwayMetricsClient(
+            token="t", project_id="p", environment_id="e"
+        )
+
+    def _patch_urlopen(self, monkeypatch, exc=None, status=200, body="{}"):
+        import urllib.error
+
+        class FakeResponse:
+            def __init__(self, status):
+                self.status = status
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return body.encode()
+
+        def fake_urlopen(request, timeout=20):
+            if exc:
+                raise exc
+            return FakeResponse(status)
+
+        monkeypatch.setattr(
+            "opsconsole.railway_client.urllib.request.urlopen", fake_urlopen
+        )
+
+    def test_missing_token_config_error(self, monkeypatch):
+        from opsconsole.railway_client import RailwayMetricsClient, RailwayMetricsError
+
+        client = RailwayMetricsClient(token="")
+        with pytest.raises(RailwayMetricsError) as exc:
+            client._post("q", {})
+        assert exc.value.code == "CONFIG_ERROR"
+
+    def test_401_config_error(self, monkeypatch):
+        import urllib.error
+
+        from opsconsole.railway_client import RailwayMetricsError
+
+        self._patch_urlopen(
+            monkeypatch, exc=urllib.error.HTTPError("u", 401, "x", None, None)
+        )
+        with pytest.raises(RailwayMetricsError) as exc:
+            self._make_client()._post("q", {})
+        assert exc.value.code == "CONFIG_ERROR"
+
+    def test_429_rate_limited(self, monkeypatch):
+        import urllib.error
+
+        from opsconsole.railway_client import RailwayMetricsError
+
+        self._patch_urlopen(
+            monkeypatch, exc=urllib.error.HTTPError("u", 429, "x", None, None)
+        )
+        with pytest.raises(RailwayMetricsError) as exc:
+            self._make_client()._post("q", {})
+        assert exc.value.code == "RATE_LIMITED"
+
+    def test_500_upstream_error(self, monkeypatch):
+        from opsconsole.railway_client import RailwayMetricsError
+
+        self._patch_urlopen(monkeypatch, status=503, body="oops")
+        with pytest.raises(RailwayMetricsError) as exc:
+            self._make_client()._post("q", {})
+        assert exc.value.code == "UPSTREAM_ERROR"
+
+    def test_graphql_auth_error_config_error(self, monkeypatch):
+        from opsconsole.railway_client import RailwayMetricsError
+
+        self._patch_urlopen(
+            monkeypatch,
+            body='{"errors":[{"message":"unauthorized"}]}',
+        )
+        with pytest.raises(RailwayMetricsError) as exc:
+            self._make_client()._post("q", {})
+        assert exc.value.code == "CONFIG_ERROR"
+
+    def test_network_error_upstream(self, monkeypatch):
+        import urllib.error
+
+        from opsconsole.railway_client import RailwayMetricsError
+
+        self._patch_urlopen(monkeypatch, exc=urllib.error.URLError("boom"))
+        with pytest.raises(RailwayMetricsError) as exc:
+            self._make_client()._post("q", {})
+        assert exc.value.code == "UPSTREAM_ERROR"
+
+
 class TestDataEndpoint:
     def test_anonymous_redirects(self, client):
         response = client.get(reverse("admin:ops_server_monitor_data"))

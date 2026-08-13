@@ -23,10 +23,11 @@ Auth: RAILWAY_METRICS_TOKEN_TYPE=bearer (default, account token) or
 
 from __future__ import annotations
 
+import json
 import logging
 import os
-
-import requests
+import urllib.error
+import urllib.request
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +85,6 @@ class RailwayMetricsClient:
         self.environment_id = environment_id or os.getenv(
             "RAILWAY_METRICS_ENVIRONMENT_ID", ""
         )
-        self._session = requests.Session()
 
     @property
     def enabled(self) -> bool:
@@ -101,31 +101,42 @@ class RailwayMetricsClient:
     def _post(self, query, variables):
         if not self.token:
             raise RailwayMetricsError("CONFIG_ERROR", "RAILWAY_METRICS_TOKEN is not set")
+        body = json.dumps({"query": query, "variables": variables}).encode("utf-8")
+        request = urllib.request.Request(
+            RAILWAY_GRAPHQL_URL,
+            data=body,
+            headers=self._headers(),
+            method="POST",
+        )
         try:
-            resp = self._session.post(
-                RAILWAY_GRAPHQL_URL,
-                headers=self._headers(),
-                json={"query": query, "variables": variables},
-                timeout=20,
-            )
-        except requests.RequestException as exc:
-            raise RailwayMetricsError("UPSTREAM_ERROR", str(exc)) from exc
-        if resp.status_code == 401:
-            raise RailwayMetricsError("CONFIG_ERROR", "unauthorized (401)")
-        if resp.status_code == 429:
-            raise RailwayMetricsError("RATE_LIMITED", "rate limited (429)")
-        if resp.status_code >= 500:
+            with urllib.request.urlopen(request, timeout=20) as response:
+                status = response.status
+                payload = response.read().decode("utf-8")
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+            if status == 401:
+                raise RailwayMetricsError("CONFIG_ERROR", "unauthorized (401)") from exc
+            if status == 429:
+                raise RailwayMetricsError("RATE_LIMITED", "rate limited (429)") from exc
             raise RailwayMetricsError(
-                "UPSTREAM_ERROR", f"upstream error ({resp.status_code})"
-            )
+                "UPSTREAM_ERROR", f"upstream error ({status})"
+            ) from exc
+        except urllib.error.URLError as exc:
+            raise RailwayMetricsError("UPSTREAM_ERROR", str(exc.reason)) from exc
+        except OSError as exc:
+            raise RailwayMetricsError("UPSTREAM_ERROR", str(exc)) from exc
+        if status >= 500:
+            raise RailwayMetricsError("UPSTREAM_ERROR", f"upstream error ({status})")
         try:
-            payload = resp.json()
+            payload_data = json.loads(payload)
         except ValueError as exc:
             raise RailwayMetricsError("UPSTREAM_ERROR", "invalid JSON response") from exc
-        errors = payload.get("errors")
+        errors = payload_data.get("errors")
         if errors:
-            raise RailwayMetricsError("CONFIG_ERROR", errors[0].get("message", "graphql error"))
-        return payload.get("data") or {}
+            raise RailwayMetricsError(
+                "CONFIG_ERROR", errors[0].get("message", "graphql error")
+            )
+        return payload_data.get("data") or {}
 
     def discover_services(self):
         """Return [{id, name}] for every service in the configured project."""
