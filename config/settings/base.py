@@ -278,7 +278,7 @@ CELERY_BEAT_SCHEDULE = {
     "ops-railway-collect-metrics": {
         "task": "ops.railway.collect_metrics",
         "schedule": max(
-            5, int(os.getenv("RAILWAY_METRICS_SAMPLE_SECONDS", "5"))
+            30, int(os.getenv("RAILWAY_METRICS_SAMPLE_SECONDS", "30"))
         ),
         "args": [],
     },

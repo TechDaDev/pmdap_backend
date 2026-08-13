@@ -38,7 +38,8 @@ MAX_BACKOFF = 300  # cap on exponential backoff (seconds)
 
 
 def get_sample_seconds():
-    return max(5, int(os.getenv("RAILWAY_METRICS_SAMPLE_SECONDS", "5")))
+    # Railway's metrics API rejects sample rates below 30s ("Invalid input").
+    return max(30, int(os.getenv("RAILWAY_METRICS_SAMPLE_SECONDS", "30")))
 
 
 def get_retention_seconds():

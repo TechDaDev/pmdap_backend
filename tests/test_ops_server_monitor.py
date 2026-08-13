@@ -133,7 +133,7 @@ class FakeClient:
 def run_collector(monkeypatch):
     """Patch the client factory + task scheduling; returns a helper."""
 
-    def _run(fake_client=None, enabled="true", sample=None):
+    def _run(fake_client=None, enabled="true", sample="30"):
         monkeypatch.setenv("RAILWAY_METRICS_ENABLED", enabled)
         if sample:
             monkeypatch.setenv("RAILWAY_METRICS_SAMPLE_SECONDS", sample)
@@ -160,7 +160,7 @@ class TestCollector:
         series = buffer.read_series("pmdap_backend", "CPU_USAGE")
         assert len(series) == 2
         assert series[0][1] == 0.5 and series[1][1] == 0.7
-        assert scheduled and scheduled[0] == 5  # reschedules at sample interval
+        assert scheduled and scheduled[0] == 30  # reschedules at sample interval
 
     def test_disabled_returns_immediately(self, fake_redis, run_collector, monkeypatch):
         called = []
@@ -176,13 +176,13 @@ class TestCollector:
         status = buffer.get_collector_status()
         assert status["status"] == "RATE_LIMITED"
         assert float(status["next_allowed_at"]) > time.time()
-        # Backoff doubles the interval.
-        assert scheduled[0] == 10
+        # Backoff doubles the interval (30 -> 60).
+        assert scheduled[0] == 60
 
     def test_early_return_within_backoff_window(self, fake_redis, run_collector):
         now = time.time()
         buffer.set_collector_status(
-            status="RATE_LIMITED", next_allowed_at=now + 60, sample_seconds=5
+            status="RATE_LIMITED", next_allowed_at=now + 60, sample_seconds=30
         )
         client, scheduled = run_collector(FakeClient())
         # Must not hit upstream while cooling down.
