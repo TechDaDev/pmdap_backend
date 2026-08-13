@@ -321,6 +321,43 @@ class TestRailwayClientErrorMapping:
             self._make_client()._post("q", {})
         assert exc.value.code == "CONFIG_ERROR"
 
+    def test_metric_query_limit_is_rate_limited(self, monkeypatch):
+        from opsconsole.railway_client import RailwayMetricsError
+
+        self._patch_urlopen(
+            monkeypatch,
+            body='{"errors":[{"message":"Too many metric queries are running at once. '
+                 'Please retry in 120 seconds. Limit: 19 concurrent metric queries per client."}]}',
+        )
+        with pytest.raises(RailwayMetricsError) as exc:
+            self._make_client()._post("q", {})
+        assert exc.value.code == "RATE_LIMITED"
+        assert "120" in exc.value.detail
+
+    def test_fetch_all_metrics_calls_per_service_sequentially(self, monkeypatch):
+        from datetime import datetime, timezone
+
+        from opsconsole.railway_client import RailwayMetricsClient
+
+        client = RailwayMetricsClient(token="t")
+        calls = []
+
+        def fake_post(query, variables):
+            calls.append(query)
+            # One MetricsResult per requested measurement (5 results max).
+            return {"metrics": [{"values": [{"ts": 1, "value": 0.1}]} for _ in range(5)]}
+
+        monkeypatch.setattr(client, "_post", fake_post)
+        services = [{"id": "a", "name": "svc1"}, {"id": "b", "name": "svc2"}]
+        now = datetime.now(timezone.utc)
+        result = client.fetch_all_metrics(services, ["CPU_USAGE", "MEMORY_USAGE_GB"], now, now, 30)
+        # One HTTP call per service (sequential) — NOT one giant batched query.
+        assert len(calls) == 2
+        assert "svc1" in result and "svc2" in result
+        assert set(result["svc1"]) == {"CPU_USAGE", "MEMORY_USAGE_GB"}
+        # Enums must be bare identifiers, not quoted strings.
+        assert "CPU_USAGE" in calls[0] and '"CPU_USAGE"' not in calls[0]
+
     def test_network_error_upstream(self, monkeypatch):
         import urllib.error
 

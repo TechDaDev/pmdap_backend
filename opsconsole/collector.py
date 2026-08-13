@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -132,6 +133,11 @@ def collect_railway_metrics():
         logger.warning("ops.railway collector %s: %s", exc.code, exc.detail)
         if exc.code == "RATE_LIMITED":
             next_interval = _backoff(interval)
+            # Railway suggests a concrete retry window in the error text
+            # (e.g. "Please retry in 120 seconds").
+            match = re.search(r"retry in (\d+) seconds", exc.detail or "", re.IGNORECASE)
+            if match:
+                next_interval = int(match.group(1))
             buffer.set_collector_status(
                 status="RATE_LIMITED",
                 next_allowed_at=time.time() + next_interval,

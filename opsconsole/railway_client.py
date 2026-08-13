@@ -144,9 +144,11 @@ class RailwayMetricsClient:
             raise RailwayMetricsError("UPSTREAM_ERROR", "invalid JSON response") from exc
         errors = payload_data.get("errors")
         if errors:
-            raise RailwayMetricsError(
-                "CONFIG_ERROR", errors[0].get("message", "graphql error")
-            )
+            message = (errors[0].get("message", "") or "")[:200]
+            lowered = message.lower()
+            if "too many" in lowered or "rate limit" in lowered:
+                raise RailwayMetricsError("RATE_LIMITED", message)
+            raise RailwayMetricsError("CONFIG_ERROR", message)
         return payload_data.get("data") or {}
 
     def discover_services(self):
@@ -177,14 +179,27 @@ class RailwayMetricsClient:
         end_dt,
         sample_rate_seconds,
     ):
-        """Fetch metrics for all services in a SINGLE GraphQL request.
+        """Fetch metrics for all services sequentially (one HTTP call each).
+
+        Railway enforces a limit of 19 concurrent metric queries per client,
+        and a single ``metrics`` call counts as one metric query PER requested
+        measurement. Batching many services/measurements into aliases exceeded
+        that limit (4 services x 5 measurements = 20), so services are fetched
+        one at a time (max 5 concurrent metric queries per call).
 
         Returns {service_name: {measurement: [(ts_epoch, value), ...], ...}}.
-        Batching with aliases keeps upstream request volume low
-        (one HTTP call per collection cycle regardless of service count).
         """
-        if not services:
-            return {}
+        out = {}
+        for svc in services:
+            name = svc.get("name") or svc.get("id")
+            out[name] = self._fetch_service_metrics(
+                svc["id"], measurements, start_dt, end_dt, sample_rate_seconds
+            )
+        return out
+
+    def _fetch_service_metrics(
+        self, service_id, measurements, start_dt, end_dt, sample_rate_seconds
+    ):
         start_iso = start_dt.isoformat()
         end_iso = end_dt.isoformat()
         # MetricMeasurement is a GraphQL enum: values must be bare identifiers
@@ -193,39 +208,31 @@ class RailwayMetricsClient:
         env_part = ""
         if self.environment_id:
             env_part = ',environmentId:"%s"' % self.environment_id
-        aliases = []
-        for index, svc in enumerate(services):
-            aliases.append(
-                "s%d: metrics(serviceId:%s,startDate:%s,endDate:%s,"
-                "measurements:[%s],sampleRateSeconds:%d%s){ values { ts value } }"
-                % (
-                    index,
-                    json_quote(svc["id"]),
-                    json_quote(start_iso),
-                    json_quote(end_iso),
-                    enum_list,
-                    int(sample_rate_seconds),
-                    env_part,
-                )
+        query = (
+            "query{ metrics(serviceId:%s,startDate:%s,endDate:%s,"
+            "measurements:[%s],sampleRateSeconds:%d%s){ values { ts value } } }"
+            % (
+                json_quote(service_id),
+                json_quote(start_iso),
+                json_quote(end_iso),
+                enum_list,
+                int(sample_rate_seconds),
+                env_part,
             )
-        query = "query{ %s }" % " ".join(aliases)
+        )
         data = self._post(query, {})
-        out = {}
-        for index, svc in enumerate(services):
-            name = svc.get("name") or ("service-%d" % index)
-            results = data.get("s%d" % index) or []
-            series = {}
-            for j, result in enumerate(results):
-                if j >= len(measurements):
-                    break
-                points = [
-                    (item["ts"], item["value"])
-                    for item in (result.get("values") or [])
-                    if isinstance(item, dict) and "ts" in item and "value" in item
-                ]
-                series[measurements[j]] = points
-            out[name] = series
-        return out
+        results = data.get("metrics") or []
+        series = {}
+        for index, result in enumerate(results):
+            if index >= len(measurements):
+                break
+            points = [
+                (item["ts"], item["value"])
+                for item in (result.get("values") or [])
+                if isinstance(item, dict) and "ts" in item and "value" in item
+            ]
+            series[measurements[index]] = points
+        return series
 
 
 def json_quote(value):
