@@ -17,10 +17,14 @@ Guarantees:
 """
 from __future__ import annotations
 
+from django.conf import settings
+
 from processing.ocr import PaddleOCREngine
 
 _engine = None
 _created_count = 0
+_latin_engine = None
+_latin_created_count = 0
 
 
 def get_ocr_engine():
@@ -36,19 +40,57 @@ def get_ocr_engine():
     return _engine
 
 
+def get_latin_ocr_engine():
+    """Return a per-process Latin/multilingual OCR engine (targeted ROI reads).
+
+    Built from the OCR_LATIN_* settings so the worker image can preload the
+    Latin recognizer. Constructed lazily once per worker process and reused,
+    matching the Arabic engine lifecycle. On failure the cache stays empty so
+    the next call retries construction.
+    """
+    global _latin_engine, _latin_created_count
+    if _latin_engine is None:
+        _latin_engine = PaddleOCREngine(
+            detection_model_name=settings.OCR_LATIN_DETECTION_MODEL_NAME,
+            recognition_model_name=settings.OCR_LATIN_RECOGNITION_MODEL_NAME,
+            detection_model_dir=settings.OCR_LATIN_DETECTION_MODEL_DIR,
+            recognition_model_dir=settings.OCR_LATIN_RECOGNITION_MODEL_DIR,
+        )
+        _latin_created_count += 1
+    return _latin_engine
+
+
 def engine_created_count() -> int:
     """How many times this OS process has constructed an engine (0, 1, ...)."""
     return _created_count
 
 
+def latin_engine_created_count() -> int:
+    """How many times the Latin engine was constructed in this process."""
+    return _latin_created_count
+
+
 def reset_ocr_engine():
-    """Drop the cached engine (tests, or a deliberate engine reset)."""
+    """Drop the cached Arabic engine (tests, or a deliberate engine reset)."""
     global _engine, _created_count
     _engine = None
     _created_count = 0
 
 
+def reset_latin_ocr_engine():
+    """Drop the cached Latin engine (tests, or a deliberate engine reset)."""
+    global _latin_engine, _latin_created_count
+    _latin_engine = None
+    _latin_created_count = 0
+
+
 def set_ocr_engine(engine):
-    """Inject an engine (tests only)."""
+    """Inject an Arabic engine (tests only)."""
     global _engine
     _engine = engine
+
+
+def set_latin_ocr_engine(engine):
+    """Inject a Latin engine (tests only)."""
+    global _latin_engine
+    _latin_engine = engine

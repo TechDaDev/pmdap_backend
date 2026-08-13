@@ -21,9 +21,15 @@ from identities.extraction_store import (
     store_extraction_result,
 )
 from identities.models import IdentityExtractionJob
+from identities.regions import REGIONS as IRAQI_REGIONS, IraqiNationalCardRegionExtractor
 from identities.storage import private_identity_storage
 from processing.ocr import OCREngineUnavailableError
-from processing.ocr_provider import engine_created_count, get_ocr_engine
+from processing.ocr_provider import (
+    engine_created_count,
+    get_latin_ocr_engine,
+    get_ocr_engine,
+    latin_engine_created_count,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -157,12 +163,14 @@ def extract_identity_document(self, job_uuid):
         job.save(update_fields=["status", "updated_at"])
 
     keys = _staging_keys(job)
-    lines = []
+    side_lines = []
+    images = {}
     total_started = time.monotonic()
     queue_wait_ms = max(
         0, int((timezone.now() - job.created_at).total_seconds() * 1000)
     )
     created_before = engine_created_count()
+    latin_created_before = latin_engine_created_count()
     timing = {}
     try:
         engine_t = time.monotonic()
@@ -182,13 +190,41 @@ def extract_identity_document(self, job_uuid):
             image = Image.open(io.BytesIO(content))
             image.load()
             timing[f"{side}_decode_ms"] = int((time.monotonic() - t) * 1000)
-            try:
+            images[side] = image
+            t = time.monotonic()
+            result = engine.extract_image(image)
+            timing[f"{side}_ocr_ms"] = int((time.monotonic() - t) * 1000)
+            tag = "FRONT" if side == "front" else "BACK"
+            for line in result.lines:
+                side_lines.append(
+                    extraction.SideLine(tag, line.text, line.confidence)
+                )
+
+        # Targeted ROI passes for the Iraqi National Card. These recover values
+        # the full-card Arabic pass misses: blood group, printed dates, family
+        # number and a clean MRZ read.
+        if job.document_type == "UNIFIED_NATIONAL_CARD" and images.get("back"):
+            latin_t = time.monotonic()
+            latin_engine = get_latin_ocr_engine()
+            timing["latin_engine_init_ms"] = int(
+                (time.monotonic() - latin_t) * 1000
+            )
+            region_extractor = IraqiNationalCardRegionExtractor(
+                arabic_engine=engine, latin_engine=latin_engine
+            )
+            for tag, spec in IRAQI_REGIONS.items():
+                region_image = images[spec["side"].lower()]
                 t = time.monotonic()
-                result = engine.extract_image(image)
-                timing[f"{side}_ocr_ms"] = int((time.monotonic() - t) * 1000)
-                lines.extend(line.text for line in result.lines)
-            finally:
+                side_lines.extend(
+                    region_extractor.extract_region(region_image, tag, spec)
+                )
+                timing[f"{tag.lower()}_ms"] = int((time.monotonic() - t) * 1000)
+
+        for image in images.values():
+            try:
                 image.close()
+            except Exception:  # pragma: no cover - defensive close
+                pass
     except OCREngineUnavailableError:
         _cleanup_staging(keys)
         _finish(
@@ -211,7 +247,7 @@ def extract_identity_document(self, job_uuid):
 
     t = time.monotonic()
     fields, warnings, mrz_summary = extraction.extract_identity(
-        job.document_type, lines
+        job.document_type, side_lines
     )
     parse_ms = int((time.monotonic() - t) * 1000)
     total_ms = int((time.monotonic() - total_started) * 1000)
@@ -232,23 +268,33 @@ def extract_identity_document(self, job_uuid):
     logger.info(
         "identity extraction job=%s type=%s status=ok "
         "queue_wait_ms=%s engine_init_ms=%s engine_reused=%s "
+        "latin_engine_init_ms=%s latin_engine_reused=%s "
         "front_storage_read_ms=%s front_decode_ms=%s front_ocr_ms=%s "
         "back_storage_read_ms=%s back_decode_ms=%s back_ocr_ms=%s "
+        "roi_blood_ms=%s roi_dates_ms=%s roi_dob_ms=%s "
+        "roi_family_ms=%s roi_mrz_ms=%s "
         "parse_ms=%s total_ms=%s line_count=%s fields=%s mrz=%s",
         job_uuid,
         job.document_type,
         queue_wait_ms,
         timing.get("engine_init_ms"),
         created_before > 0,
+        timing.get("latin_engine_init_ms"),
+        latin_created_before > 0,
         timing.get("front_storage_read_ms"),
         timing.get("front_decode_ms"),
         timing.get("front_ocr_ms"),
         timing.get("back_storage_read_ms"),
         timing.get("back_decode_ms"),
         timing.get("back_ocr_ms"),
+        timing.get("roi_blood_ms"),
+        timing.get("roi_dates_ms"),
+        timing.get("roi_dob_ms"),
+        timing.get("roi_family_ms"),
+        timing.get("roi_mrz_ms"),
         parse_ms,
         total_ms,
-        len(lines),
+        len(side_lines),
         bucket_summary,
         mrz_summary.get("detected"),
     )

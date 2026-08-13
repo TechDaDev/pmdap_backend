@@ -172,6 +172,18 @@ OCR_TEXT_RECOGNITION_MODEL_NAME = os.getenv(
 )
 OCR_TEXT_DETECTION_MODEL_DIR = os.getenv("OCR_TEXT_DETECTION_MODEL_DIR", "")
 OCR_TEXT_RECOGNITION_MODEL_DIR = os.getenv("OCR_TEXT_RECOGNITION_MODEL_DIR", "")
+# Secondary Latin/multilingual OCR pipeline used for targeted region (ROI) reads
+# of Latin-script values on the Iraqi National Card: blood group, printed
+# dates, family number and the machine-readable zone. Uses the general
+# multilingual recognizer (PP-OCRv6_medium_rec) which handles Latin/ASCII well.
+OCR_LATIN_DETECTION_MODEL_NAME = os.getenv(
+    "OCR_LATIN_DETECTION_MODEL_NAME", "PP-OCRv6_medium_det"
+)
+OCR_LATIN_RECOGNITION_MODEL_NAME = os.getenv(
+    "OCR_LATIN_RECOGNITION_MODEL_NAME", "PP-OCRv6_medium_rec"
+)
+OCR_LATIN_DETECTION_MODEL_DIR = os.getenv("OCR_LATIN_DETECTION_MODEL_DIR", "")
+OCR_LATIN_RECOGNITION_MODEL_DIR = os.getenv("OCR_LATIN_RECOGNITION_MODEL_DIR", "")
 OCR_PDF_RENDER_DPI = int(os.getenv("OCR_PDF_RENDER_DPI", "300"))
 OCR_PDF_RENDER_MAX_DPI = int(os.getenv("OCR_PDF_RENDER_MAX_DPI", "400"))
 OCR_MAX_IMAGE_PIXELS = int(os.getenv("OCR_MAX_IMAGE_PIXELS", "20000000"))

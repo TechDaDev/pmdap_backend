@@ -147,7 +147,15 @@ class PDFPageRenderer:
 class PaddleOCREngine(OCREngine):
     engine_name = "paddleocr"
 
-    def __init__(self, *, pipeline=None):
+    def __init__(
+        self,
+        *,
+        pipeline=None,
+        detection_model_name=None,
+        recognition_model_name=None,
+        detection_model_dir=None,
+        recognition_model_dir=None,
+    ):
         try:
             import paddleocr
         except ImportError as exc:
@@ -160,6 +168,11 @@ class PaddleOCREngine(OCREngine):
             try:
                 from paddleocr import PaddleOCR
 
+                det_name = detection_model_name or settings.OCR_TEXT_DETECTION_MODEL_NAME
+                rec_name = recognition_model_name or settings.OCR_TEXT_RECOGNITION_MODEL_NAME
+                det_dir = detection_model_dir or settings.OCR_TEXT_DETECTION_MODEL_DIR
+                rec_dir = recognition_model_dir or settings.OCR_TEXT_RECOGNITION_MODEL_DIR
+
                 options = {
                     "device": "cpu",
                     "enable_mkldnn": False,
@@ -167,22 +180,14 @@ class PaddleOCREngine(OCREngine):
                     "use_doc_unwarping": False,
                     "use_textline_orientation": False,
                 }
-                if settings.OCR_TEXT_DETECTION_MODEL_DIR:
-                    options["text_detection_model_dir"] = (
-                        settings.OCR_TEXT_DETECTION_MODEL_DIR
-                    )
+                if det_dir:
+                    options["text_detection_model_dir"] = det_dir
                 else:
-                    options["text_detection_model_name"] = (
-                        settings.OCR_TEXT_DETECTION_MODEL_NAME
-                    )
-                if settings.OCR_TEXT_RECOGNITION_MODEL_DIR:
-                    options["text_recognition_model_dir"] = (
-                        settings.OCR_TEXT_RECOGNITION_MODEL_DIR
-                    )
+                    options["text_detection_model_name"] = det_name
+                if rec_dir:
+                    options["text_recognition_model_dir"] = rec_dir
                 else:
-                    options["text_recognition_model_name"] = (
-                        settings.OCR_TEXT_RECOGNITION_MODEL_NAME
-                    )
+                    options["text_recognition_model_name"] = rec_name
                 pipeline = PaddleOCR(**options)
             except Exception as exc:
                 raise OCREngineUnavailableError(
