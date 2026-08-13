@@ -21,12 +21,14 @@ EXTRACT = "/api/v1/identity-documents/extract/"
 
 @pytest.fixture(autouse=True)
 def reset_ocr_engine_cache():
-    """The per-process engine singleton is shared across tests in one process."""
-    from processing.ocr_provider import reset_ocr_engine
+    """Per-process engine singletons are shared across tests in one process."""
+    from processing.ocr_provider import reset_latin_ocr_engine, reset_ocr_engine
 
     reset_ocr_engine()
+    reset_latin_ocr_engine()
     yield
     reset_ocr_engine()
+    reset_latin_ocr_engine()
 
 
 def synthetic_png(text="SYNTHETIC TEST DOCUMENT 123456789012345"):
@@ -92,6 +94,9 @@ def test_extract_async_flow_returns_structured_result_without_db_record(
     from identities.models import IdentityDocument
 
     class FakeEngine:
+        def __init__(self, *args, **kwargs):
+            pass
+
         def extract_image(self, image):
             return FakeResult()
 
@@ -128,7 +133,8 @@ def test_extract_async_flow_returns_structured_result_without_db_record(
     assert data["status"] == "SUCCESS"
     assert data["document_type"] == "UNIFIED_NATIONAL_CARD"
     assert data["extractor_version"] == "identity-v1"
-    assert data["fields"]["national_number"]["value"] == "012345678901234"
+    # Synthetic front/back lines yield the fixed issuing_country field.
+    assert data["fields"]["issuing_country"]["value"] == "IQ"
     assert data["mrz"]["detected"] is False
     # No raw OCR text / image bytes anywhere in the response.
     raw = resp.content.decode()
@@ -145,8 +151,8 @@ def test_extract_async_flow_returns_structured_result_without_db_record(
     resp2 = api_client.get(f"{EXTRACT}{job_id}/")
     assert resp2.status_code == 200
     assert (
-        resp2.json()["data"]["fields"]["national_number"]["value"]
-        == "012345678901234"
+        resp2.json()["data"]["fields"]["issuing_country"]["value"]
+        == "IQ"
     )
 
 
@@ -206,17 +212,25 @@ def test_extract_status_unknown_job_404(api_client):
 def test_extract_national_card_fields_deterministic():
     lines = [
         "العراق",
-        "123456789012345",
-        "1234",
-        "DOC98765",
+        "الاسم اناو SYNTHNAME",
+        "اباوك SYNTHFATHER",
+        "ابابيرSYNTHGRAND",
+        "الجنس اركمز ذكر",
+        "123456789012",
+        "H12345678",
     ]
     fields, warnings, mrz_summary = extraction.extract_identity(
         "UNIFIED_NATIONAL_CARD", lines
     )
     assert fields["issuing_country"] == {"value": "IQ", "confidence": 1.0, "source": "DOCUMENT_TYPE"}
-    assert fields["national_number"]["value"] == "123456789012345"
-    assert fields["family_number"]["value"] == "1234"
-    assert "document_number" in fields
+    assert fields["name"]["value"] == "SYNTHNAME"
+    assert fields["father_name"]["value"] == "SYNTHFATHER"
+    assert fields["grandfather_name"]["value"] == "SYNTHGRAND"
+    assert fields["sex"]["value"] == "MALE"
+    assert fields["national_card_number"]["value"] == "123456789012"
+    assert fields["unique_card_body_number"]["value"] == "H12345678"
+    # Front-only lines carry no family number source -> never junk.
+    assert "family_number" not in fields
     assert mrz_summary["detected"] is False
 
 

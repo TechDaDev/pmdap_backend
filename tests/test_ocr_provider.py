@@ -18,7 +18,10 @@ from identities.storage import private_identity_storage
 from processing.ocr import OCREngineUnavailableError
 from processing.ocr_provider import (
     engine_created_count,
+    get_latin_ocr_engine,
     get_ocr_engine,
+    latin_engine_created_count,
+    reset_latin_ocr_engine,
     reset_ocr_engine,
     set_ocr_engine,
 )
@@ -28,9 +31,11 @@ from tests.factories import UserFactory
 @pytest.fixture(autouse=True)
 def reset_engine_cache():
     reset_ocr_engine()
+    reset_latin_ocr_engine()
     _CountingEngine.constructions = 0
     yield
     reset_ocr_engine()
+    reset_latin_ocr_engine()
 
 
 @pytest.fixture(autouse=True)
@@ -130,7 +135,7 @@ def test_identity_task_reuses_same_engine_across_two_jobs(monkeypatch):
     class FakeEngine:
         constructions = 0
 
-        def __init__(self):
+        def __init__(self, *args, **kwargs):
             type(self).constructions += 1
 
         def extract_image(self, image):
@@ -153,7 +158,8 @@ def test_identity_task_reuses_same_engine_across_two_jobs(monkeypatch):
     job2.refresh_from_db()
     assert job1.status == IdentityExtractionJob.Status.SUCCESS
     assert job2.status == IdentityExtractionJob.Status.SUCCESS
-    # Exactly ONE engine constructed in this process, serving all 4 images
-    # (front+back across both jobs) — per-process engine reuse works.
-    assert FakeEngine.constructions == 1
+    # Two per-process singletons (Arabic + Latin), each constructed ONCE and
+    # reused across all images of both jobs — per-process engine reuse works.
+    assert FakeEngine.constructions == 2
     assert engine_created_count() == 1
+    assert latin_engine_created_count() == 1

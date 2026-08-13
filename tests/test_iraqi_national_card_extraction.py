@@ -1,0 +1,468 @@
+"""Iraqi National Card structured extraction tests — SYNTHETIC data only.
+
+Every value here is invented (TESTNAME / TESTFATHER / 123456789012 /
+H12345678 / TESTFAMILY123456 / 1990-05-17 ...). Real owner card values are
+never used. Covers the field matrix plus the critical regression guards:
+family number must never come from MRZ noise, and the H... body number must
+never populate family_number.
+"""
+import pytest
+
+from identities import extraction, mrz
+from identities.regions import REGIONS, IraqiNationalCardRegionExtractor
+
+
+# --------------------------------------------------------------------------- #
+# Synthetic helpers
+# --------------------------------------------------------------------------- #
+
+def _cd(value):
+    return str(mrz.check_digit(value))
+
+
+def _iraqi_mrz_lines(dob="900517", sex="M", expiry="360101", doc="H12345678"):
+    line1 = ("ID" + "IRQ" + doc + _cd(doc) + "900101202601").ljust(30, "<")
+    line2 = (dob + _cd(dob) + sex + expiry + _cd(expiry) + "IRQ").ljust(30, "<")
+    line3 = "TESTGRANDFATHER<<TESTNAME".ljust(30, "<")
+    return [line1, line2, line3]
+
+
+def _front(name="الاسم اناو TESTNAME",
+           father="اباوك TESTFATHER",
+           grandfather="ابابيرTESTGRAND",
+           sex="الجنس اركمز ذكر",
+           card="123456789012",
+           body="H12345678"):
+    return [
+        extraction.SideLine("FRONT", name, 0.9),
+        extraction.SideLine("FRONT", father, 0.9),
+        extraction.SideLine("FRONT", "الاب", 0.9),
+        extraction.SideLine("FRONT", grandfather, 0.9),
+        extraction.SideLine("FRONT", "الجد", 0.9),
+        extraction.SideLine("FRONT", "اللقب انازناو TESTTITLE", 0.9),
+        extraction.SideLine("FRONT", "ادايك TESTMOTHER", 0.9),
+        extraction.SideLine("FRONT", "الأم", 0.9),
+        extraction.SideLine("FRONT", sex, 0.9),
+        extraction.SideLine("FRONT", card, 0.9),
+        extraction.SideLine("FRONT", body, 0.9),
+    ]
+
+
+def _card_lines(*, blood=("ROI_BLOOD", "O+"), dob=("ROI_DOB", "1990/05/17"),
+                family=("ROI_FAMILY", "TESTFAMILY123456"), mrz=True):
+    lines = _front()
+    lines.append(extraction.SideLine("BACK", "تأريخ الولادة ارؤزى لهدايك بوون", 0.8))
+    lines.append(extraction.SideLine("BACK", "الرقملعانليمارى خاني", 0.7))
+    if blood:
+        lines.append(extraction.SideLine(blood[0], blood[1], 0.9))
+    if dob:
+        lines.append(extraction.SideLine(dob[0], dob[1], 0.9))
+    if family:
+        lines.append(extraction.SideLine(family[0], family[1], 0.9))
+    if mrz:
+        for line in _iraqi_mrz_lines():
+            lines.append(extraction.SideLine("ROI_MRZ", line, 0.9))
+    return lines
+
+
+def _run(lines):
+    return extraction.extract_identity("UNIFIED_NATIONAL_CARD", lines)
+
+
+# --------------------------------------------------------------------------- #
+# Name components
+# --------------------------------------------------------------------------- #
+
+def test_name_father_grandfather_extracted_distinct():
+    fields, warnings, _ = _run(_card_lines(mrz=False))
+    assert fields["name"]["value"] == "TESTNAME"
+    assert fields["name"]["source"] == "FRONT_PRINTED"
+    assert fields["father_name"]["value"] == "TESTFATHER"
+    assert fields["grandfather_name"]["value"] == "TESTGRAND"
+
+
+def test_name_label_variants():
+    fields, _, _ = _run(_card_lines(mrz=False))
+    # Alternate spacing/connector rendering must still resolve.
+    alt = _card_lines(mrz=False)
+    alt[0] = extraction.SideLine("FRONT", "الاسم: اناو TESTNAME", 0.8)
+    fields2, _, _ = _run(alt)
+    assert fields["name"]["value"] == "TESTNAME"
+    assert fields2["name"]["value"] == "TESTNAME"
+
+
+def test_paternal_not_maternal_grandfather():
+    # Mother + maternal grandfather appear AFTER the father chain; the
+    # extractor must pick the paternal (pre-mother) grandfather only.
+    lines = [
+        extraction.SideLine("FRONT", "الاسم اناو TESTNAME", 0.9),
+        extraction.SideLine("FRONT", "اباوك TESTFATHER", 0.9),
+        extraction.SideLine("FRONT", "ابابيرPATERNALGRAND", 0.9),
+        extraction.SideLine("FRONT", "ادايك TESTMOTHER", 0.9),
+        extraction.SideLine("FRONT", "ابيرMATERNALGRAND", 0.9),
+        extraction.SideLine("FRONT", "الجنس اركمز ذكر", 0.9),
+        extraction.SideLine("FRONT", "123456789012", 0.9),
+        extraction.SideLine("FRONT", "H12345678", 0.9),
+    ]
+    fields, _, _ = _run(lines)
+    assert fields["grandfather_name"]["value"] == "PATERNALGRAND"
+    assert fields["grandfather_name"]["value"] != "MATERNALGRAND"
+    assert "MATERNALGRAND" not in [f["value"] for f in fields.values()]
+
+
+def test_father_label_alone_ignored():
+    # A bare "الاب" label line must not swallow a later name value.
+    lines = [
+        extraction.SideLine("FRONT", "الاسم اناو TESTNAME", 0.9),
+        extraction.SideLine("FRONT", "الاب", 0.9),
+        extraction.SideLine("FRONT", "ابابيرTESTGRAND", 0.9),
+        extraction.SideLine("FRONT", "الجنس اركمز ذكر", 0.9),
+        extraction.SideLine("FRONT", "123456789012", 0.9),
+        extraction.SideLine("FRONT", "H12345678", 0.9),
+    ]
+    fields, _, _ = _run(lines)
+    assert fields["name"]["value"] == "TESTNAME"
+    assert fields["grandfather_name"]["value"] == "TESTGRAND"
+
+
+# --------------------------------------------------------------------------- #
+# Sex
+# --------------------------------------------------------------------------- #
+
+def test_sex_male_from_front_and_mrz_agree():
+    fields, warnings, _ = _run(_card_lines())
+    assert fields["sex"]["value"] == "MALE"
+    assert fields["sex"]["confidence"] >= 0.9
+    assert fields["sex"]["cross_check"] == "MRZ_AGREE"
+
+
+def test_sex_female_from_front():
+    lines = _card_lines(mrz=False)
+    lines[8] = extraction.SideLine("FRONT", "الجنس اركمز انثى", 0.9)
+    fields, _, _ = _run(lines)
+    assert fields["sex"]["value"] == "FEMALE"
+
+
+def test_sex_conflict_lowers_confidence_and_warns():
+    lines = _card_lines()
+    lines[8] = extraction.SideLine("FRONT", "الجنس اركمز انثى", 0.9)  # front F, MRZ M
+    fields, warnings, _ = _run(lines)
+    assert fields["sex"]["value"] == "FEMALE"
+    assert fields["sex"]["confidence"] < 0.6
+    assert fields["sex"]["cross_check"] == "MRZ_MISMATCH"
+    assert "SOURCE_MISMATCH" in warnings
+
+
+def test_sex_from_mrz_only():
+    lines = _card_lines(mrz=True)
+    # drop the front sex line
+    lines = [ln for ln in lines if "الجنس" not in ln.text]
+    fields, _, _ = _run(lines)
+    assert fields["sex"]["value"] == "MALE"
+    assert fields["sex"]["source"] == "MRZ"
+
+
+# --------------------------------------------------------------------------- #
+# Blood group
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.parametrize("raw,expected", [
+    ("O+", "O+"), ("O-", "O-"), ("A+", "A+"), ("A-", "A-"),
+    ("B+", "B+"), ("B-", "B-"), ("AB+", "AB+"), ("AB-", "AB-"),
+])
+def test_blood_group_all_groups(raw, expected):
+    fields, _, _ = _run(_card_lines(blood=("ROI_BLOOD", raw), mrz=False))
+    assert fields["blood_group"]["value"] == expected
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("0+", "O+"), ("O +", "O+"), ("AB +", "AB+"), ("0-", "O-"),
+])
+def test_blood_group_ocr_variants(raw, expected):
+    fields, _, _ = _run(_card_lines(blood=("ROI_BLOOD", raw), mrz=False))
+    assert fields["blood_group"]["value"] == expected
+
+
+def test_blood_group_invalid_not_normalized():
+    fields, warnings, _ = _run(_card_lines(blood=("ROI_BLOOD", "1O+"), mrz=False))
+    assert "blood_group" not in fields
+    assert "BLOOD_GROUP_NOT_FOUND" in warnings
+
+
+def test_blood_group_missing_warns():
+    fields, warnings, _ = _run(_card_lines(blood=None, mrz=False))
+    assert "blood_group" not in fields
+    assert "BLOOD_GROUP_NOT_FOUND" in warnings
+
+
+# --------------------------------------------------------------------------- #
+# National / card number + O/0 confusion
+# --------------------------------------------------------------------------- #
+
+def test_national_card_number_extracted():
+    fields, _, _ = _run(_card_lines(mrz=False))
+    assert fields["national_card_number"]["value"] == "123456789012"
+    # Compatibility alias for the current IdentityDocument persistence.
+    assert fields["document_number"]["value"] == "123456789012"
+
+
+def test_card_number_o_zero_normalized():
+    lines = _card_lines(mrz=False)
+    lines[9] = extraction.SideLine("FRONT", "12345678901O", 0.9)
+    fields, warnings, _ = _run(lines)
+    assert fields["national_card_number"]["value"] == "123456789010"
+    assert "OCR_CHARACTER_NORMALIZED" in warnings
+    # Confidence must drop after a normalization correction.
+    normal_fields, _, _ = _run(_card_lines(mrz=False))
+    assert fields["national_card_number"]["confidence"] < normal_fields[
+        "national_card_number"
+    ]["confidence"]
+
+
+def test_body_number_case_canonicalized_not_normalized():
+    # Body number format is H + digits; it is uppercased, never run through
+    # the O/0 confusable correction used for the numeric card number.
+    lines = _card_lines(mrz=False)
+    lines[10] = extraction.SideLine("FRONT", "h12345678", 0.9)
+    fields, warnings, _ = _run(lines)
+    assert fields["unique_card_body_number"]["value"] == "H12345678"
+    assert "OCR_CHARACTER_NORMALIZED" not in warnings
+
+
+# --------------------------------------------------------------------------- #
+# Unique card body number
+# --------------------------------------------------------------------------- #
+
+def test_unique_body_number_set_not_family():
+    fields, _, _ = _run(_card_lines())
+    assert fields["unique_card_body_number"]["value"] == "H12345678"
+    assert fields["unique_card_body_number"]["cross_check"] == "MRZ_AGREE"
+    assert fields["family_number"]["value"] == "TESTFAMILY123456"
+    assert fields["family_number"]["value"] != "H12345678"
+
+
+def test_unique_body_number_without_mrz():
+    fields, _, _ = _run(_card_lines(mrz=False))
+    assert fields["unique_card_body_number"]["value"] == "H12345678"
+    assert "cross_check" not in fields["unique_card_body_number"]
+
+
+# --------------------------------------------------------------------------- #
+# Family number
+# --------------------------------------------------------------------------- #
+
+def test_family_number_from_back():
+    fields, _, _ = _run(_card_lines())
+    assert fields["family_number"]["value"] == "TESTFAMILY123456"
+    assert fields["family_number"]["source"] == "BACK_PRINTED"
+
+
+def test_family_number_missing_with_mrz_noise_only():
+    # MRZ noise alone must NEVER become a family number.
+    lines = _front()
+    lines.append(extraction.SideLine("BACK", "IDIRQH1234567890123456789<<<", 0.9))
+    lines.append(extraction.SideLine("BACK", "9005170M3601012IRQ<<<<555<<<<5", 0.9))
+    fields, warnings, _ = _run(lines)
+    assert "family_number" not in fields
+    assert "FAMILY_NUMBER_NOT_FOUND" in warnings
+
+
+@pytest.mark.parametrize("noise", ["555", "1234"])
+def test_family_number_never_short_digit_group(noise):
+    lines = _front()
+    lines.append(extraction.SideLine("BACK", f"some label {noise}", 0.9))
+    fields, _, _ = _run(lines)
+    assert "family_number" not in fields
+
+
+def test_family_number_never_equals_body_number():
+    # If the only long alphanumeric candidate is the body number, it must NOT
+    # be reported as the family number.
+    lines = _card_lines(family=("ROI_FAMILY", "H12345678"), mrz=False)
+    fields, _, _ = _run(lines)
+    assert "family_number" not in fields
+    assert fields["unique_card_body_number"]["value"] == "H12345678"
+
+
+# --------------------------------------------------------------------------- #
+# Date of birth
+# --------------------------------------------------------------------------- #
+
+def test_dob_printed_and_mrz_agree():
+    fields, _, _ = _run(_card_lines())
+    assert fields["date_of_birth"]["value"] == "1990-05-17"
+    assert fields["date_of_birth"]["confidence"] >= 0.9
+    assert fields["date_of_birth"]["cross_check"] == "MRZ_AGREE"
+
+
+def test_dob_printed_only():
+    fields, _, _ = _run(_card_lines(mrz=False))
+    assert fields["date_of_birth"]["value"] == "1990-05-17"
+    assert fields["date_of_birth"]["confidence"] < 0.9
+    assert fields["date_of_birth"]["source"] == "BACK_PRINTED"
+
+
+def test_dob_mrz_only():
+    lines = _card_lines(dob=None)
+    fields, _, _ = _run(lines)
+    assert fields["date_of_birth"]["value"] == "1990-05-17"
+    assert fields["date_of_birth"]["source"] == "MRZ"
+
+
+def test_dob_conflict_lowers_confidence_and_warns():
+    lines = _card_lines(dob=("ROI_DOB", "1991/05/17"))
+    fields, warnings, _ = _run(lines)
+    assert fields["date_of_birth"]["value"] == "1991-05-17"
+    assert fields["date_of_birth"]["cross_check"] == "MRZ_MISMATCH"
+    assert fields["date_of_birth"]["confidence"] < 0.6
+    assert "SOURCE_MISMATCH" in warnings
+
+
+def test_dob_future_rejected():
+    # A future printed DOB must not be silently accepted.
+    lines = _card_lines(dob=("ROI_DOB", "2099/05/17"), mrz=False)
+    fields, _, _ = _run(lines)
+    assert "date_of_birth" not in fields
+
+
+def test_dob_invalid_month_ignored():
+    lines = _card_lines(dob=("ROI_DOB", "1990/13/17"), mrz=False)
+    fields, _, _ = _run(lines)
+    assert "date_of_birth" not in fields
+
+
+def test_expiry_prefers_mrz_on_printed_truncation():
+    # A truncated/ambiguous printed expiry must not win over the validated MRZ.
+    lines = _card_lines()
+    lines = [ln for ln in lines if ln.side != "ROI_DATES"]
+    lines.append(extraction.SideLine("ROI_DATES", "2036/07/01", 0.9))
+    fields, warnings, _ = _run(lines)
+    assert fields["expiry_date"]["value"] == "2036-01-01"  # MRZ authoritative
+    assert fields["expiry_date"]["cross_check"] == "MRZ_MISMATCH"
+    assert "SOURCE_MISMATCH" in warnings
+
+
+# --------------------------------------------------------------------------- #
+# MRZ parser
+# --------------------------------------------------------------------------- #
+
+def test_iraqi_mrz_parses_all_fields():
+    lines = _iraqi_mrz_lines()
+    result = mrz.parse_iraqi_national_card_mrz(lines)
+    assert result.detected is True
+    assert result.valid is True
+    assert result.checks_passed is True
+    assert result.document_number == "H12345678"
+    assert result.date_of_birth.isoformat() == "1990-05-17"
+    assert result.sex == "M"
+    assert result.expiry_date.isoformat() == "2036-01-01"
+    assert result.nationality == "IRQ"
+    assert "TESTNAME" in (result.name or "")
+
+
+def test_iraqi_mrz_partial_without_line3():
+    lines = _iraqi_mrz_lines()[:2]
+    result = mrz.parse_iraqi_national_card_mrz(lines)
+    assert result.detected is True
+    assert result.date_of_birth is not None
+    assert result.sex == "M"
+    assert "MRZ_PARTIAL" in result.warnings
+
+
+def test_iraqi_mrz_bad_check_lowers_doc_confidence():
+    # Store a check digit that does NOT match the document number.
+    doc = "H12345678"
+    wrong_check = "0"
+    assert _cd(doc) != wrong_check
+    line1 = ("ID" + "IRQ" + doc + wrong_check + "900101202601").ljust(30, "<")
+    lines = _iraqi_mrz_lines()
+    lines[0] = line1
+    result = mrz.parse_iraqi_national_card_mrz(lines)
+    assert "document_number" in result.low_confidence_fields
+    assert result.valid is False
+
+
+def test_iraqi_mrz_not_detected():
+    result = mrz.parse_iraqi_national_card_mrz(["garbage", "not an mrz"])
+    assert result.detected is False
+    assert "MRZ_NOT_DETECTED" in result.warnings
+
+
+def test_iraqi_mrz_line3_mangled_arabic_digits_sanitized():
+    # Arabic-Indic digits and noise in line 3 must be tolerated.
+    lines = _iraqi_mrz_lines()
+    lines[2] = "MFRJSSASMAEYLS٢>٢SSSS٢<<<<<"
+    result = mrz.parse_iraqi_national_card_mrz(lines)
+    assert result.detected is True
+    assert result.date_of_birth.isoformat() == "1990-05-17"
+    assert result.sex == "M"
+
+
+# --------------------------------------------------------------------------- #
+# Missing-field / noise robustness
+# --------------------------------------------------------------------------- #
+
+def test_empty_input_missing_everything():
+    fields, warnings, mrz_summary = extraction.extract_identity(
+        "UNIFIED_NATIONAL_CARD", []
+    )
+    assert fields == {}
+    assert mrz_summary["detected"] is False
+    assert warnings
+
+
+def test_legacy_plain_strings_treated_as_front():
+    fields, warnings, mrz_summary = extraction.extract_identity(
+        "UNIFIED_NATIONAL_CARD",
+        ["العراق", "الاسم اناو SYNTHNAME", "الجنس اركمز ذكر",
+         "123456789012", "H12345678"],
+    )
+    assert fields["name"]["value"] == "SYNTHNAME"
+    assert fields["sex"]["value"] == "MALE"
+    assert fields["national_card_number"]["value"] == "123456789012"
+    assert fields["unique_card_body_number"]["value"] == "H12345678"
+    assert "family_number" not in fields
+
+
+# --------------------------------------------------------------------------- #
+# Region extractor
+# --------------------------------------------------------------------------- #
+
+class _FakeEngine:
+    def __init__(self, lines=None):
+        self._lines = lines or [("ROITEXT", 0.9)]
+
+    def extract_image(self, image):
+        return type(
+            "R",
+            (),
+            {
+                "lines": tuple(
+                    type("L", (), {"text": t, "confidence": c})()
+                    for t, c in self._lines
+                )
+            },
+        )()
+
+
+def test_region_extractor_produces_tagged_lines():
+    from PIL import Image
+
+    arabic = _FakeEngine([("عربي", 0.8)])
+    latin = _FakeEngine([("LATIN", 0.9)])
+    extractor = IraqiNationalCardRegionExtractor(arabic, latin)
+    img = Image.new("RGB", (100, 60), "white")
+    lines = extractor.run(img, img)
+    sides = {line.side for line in lines}
+    assert sides == set(REGIONS.keys())
+    assert any(line.side == "ROI_MRZ" for line in lines)
+
+
+def test_region_definitions_are_normalized_fractions():
+    for tag, spec in REGIONS.items():
+        assert 0.0 <= spec["x"] < 1.0
+        assert 0.0 <= spec["y"] < 1.0
+        assert spec["w"] > 0 and spec["h"] > 0
+        assert spec["side"] in ("FRONT", "BACK")
+        assert spec["engine"] in ("arabic", "latin")
+        assert spec["scale"] >= 1
