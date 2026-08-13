@@ -7,10 +7,11 @@
   "use strict";
 
   var cfg = window.PMDAP_MONITOR || { dataUrl: "", pollMs: 3000 };
-  var servicesEl = document.getElementById("monitor-services");
-  var statusEl = document.getElementById("monitor-status");
-  var statusTextEl = document.getElementById("monitor-status-text");
   var windowSeconds = 900;
+
+  // DOM elements are resolved lazily inside functions: the script runs from
+  // <head> (extrahead) before the <body> exists.
+  function el(id) { return document.getElementById(id); }
 
   var charts = {}; // service -> { cpu, memdisk, net }
   var controller = null;
@@ -32,6 +33,7 @@
   }
 
   function buildServiceCards(serviceNames) {
+    var servicesEl = el("monitor-services");
     servicesEl.innerHTML = "";
     charts = {};
     serviceNames.forEach(function (name) {
@@ -153,6 +155,7 @@
   }
 
   function render(data) {
+    var statusTextEl = el("monitor-status-text");
     var status = data.status || "STALE";
     var threshold = Math.max(3 * (data.sample_seconds || 5), 30);
     var stale = status !== "OK" || staleSeconds(data) > threshold;
@@ -160,7 +163,7 @@
     var badge = stale ? '<span class="ops-stale">STALE</span>' : '<span class="ops-ok">LIVE</span>';
     var statusText = "Collector status: " + status + " &middot; last update " + (data.updated_at ? timeLabel(data.updated_at) : "never");
     if (stale) statusText += " &middot; data is stale";
-    statusTextEl.innerHTML = badge + " " + statusText;
+    if (statusTextEl) statusTextEl.innerHTML = badge + " " + statusText;
 
     var names = Object.keys(data.services || {});
     if (charts[names[0]] === undefined || (lastData && JSON.stringify(Object.keys(lastData.services || {})) !== JSON.stringify(names))) {
@@ -180,7 +183,10 @@
       .then(render)
       .catch(function (err) {
         if (err && err.name === "AbortError") return;
-        statusTextEl.innerHTML = '<span class="ops-stale">OFFLINE</span> Cannot reach monitor data endpoint: ' + escapeHtml(String(err));
+        var statusTextEl = el("monitor-status-text");
+        if (statusTextEl) {
+          statusTextEl.innerHTML = '<span class="ops-stale">OFFLINE</span> Cannot reach monitor data endpoint: ' + escapeHtml(String(err));
+        }
       })
       .finally(function () { controller = null; });
   }
