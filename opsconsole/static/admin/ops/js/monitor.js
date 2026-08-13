@@ -113,7 +113,7 @@
       var dt = points[i][0] - points[i - 1][0];
       if (dt <= 0) continue;
       var gbPerSec = (points[i][1] - points[i - 1][1]) / dt;
-      out.push([points[i][0], gbPerSec * 1024]); // GB/s -> MB/s
+      out.push([points[i][0], Math.max(0, gbPerSec * 1024)]); // GB/s -> MB/s
     }
     return out;
   }
