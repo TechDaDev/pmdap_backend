@@ -95,6 +95,48 @@ def process_registration_identity_extraction(self, job_uuid):
         return None
 
     store_registration_result(job.uuid, payload)
+    # Safe log: job, timings, confidence buckets only. NEVER OCR text, names,
+    # DOB, identifiers, storage keys or tokens.
+    from identities.extraction import confidence_bucket
+
+    fields = payload["fields"]
+    bucket_summary = {
+        name: confidence_bucket(f["confidence"]) for name, f in fields.items()
+    }
+    queue_wait_ms = max(
+        0, int((timezone.now() - job.created_at).total_seconds() * 1000)
+    )
+    logger.info(
+        "registration identity extraction job=%s type=%s status=ok "
+        "queue_wait_ms=%s engine_init_ms=%s engine_reused=%s "
+        "latin_engine_init_ms=%s latin_engine_reused=%s "
+        "front_ocr_ms=%s back_ocr_ms=%s "
+        "roi_blood_ms=%s roi_dates_ms=%s roi_dob_ms=%s "
+        "roi_family_ms=%s roi_mrz_ms=%s "
+        "roi_mrz_skipped=%s roi_dob_skipped=%s "
+        "parse_ms=%s total_ms=%s line_count=%s fields=%s mrz=%s",
+        job_uuid,
+        job.document_type,
+        queue_wait_ms,
+        timing.get("engine_init_ms"),
+        created_before > 0,
+        timing.get("latin_engine_init_ms"),
+        latin_created_before > 0,
+        timing.get("front_ocr_ms"),
+        timing.get("back_ocr_ms"),
+        timing.get("roi_blood_ms"),
+        timing.get("roi_dates_ms"),
+        timing.get("roi_dob_ms"),
+        timing.get("roi_family_ms"),
+        timing.get("roi_mrz_ms"),
+        bool(timing.get("roi_mrz_skipped")),
+        bool(timing.get("roi_dob_skipped")),
+        timing.get("parse_ms"),
+        timing.get("total_ms"),
+        line_count,
+        bucket_summary,
+        payload["mrz"].get("detected"),
+    )
     # SUCCESS keeps the staged images: the final register promotes them
     # (single upload). Result lives in the cache for the review window.
     _finish(

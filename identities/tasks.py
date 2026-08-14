@@ -15,7 +15,7 @@ from django.db import transaction
 from django.utils import timezone
 from PIL import Image
 
-from identities import extraction
+from identities import extraction, mrz
 from identities.extraction_store import (
     clear_extraction_result,
     store_extraction_result,
@@ -140,6 +140,27 @@ def _expire_job(job):
     job.delete()
 
 
+def _adaptive_roi_plan(mrz_probe) -> dict[str, bool]:
+    """Which ROI passes to SKIP given a full-OCR MRZ probe (no inference).
+
+    A clean MRZ read from the full back-card Arabic OCR makes the ROI_MRZ
+    crop redundant (the parser already consumes the back full-OCR lines), and
+    a validated MRZ DOB makes the ROI_DOB crop redundant. Returns
+    {ROI tag: skip?}. Always returns False for ROIs that must run.
+    """
+    skip_mrz = bool(mrz_probe.detected and mrz_probe.checks_passed)
+    skip_dob = bool(mrz_probe.date_of_birth) and (
+        "date_of_birth" not in mrz_probe.low_confidence_fields
+    )
+    return {
+        "ROI_MRZ": skip_mrz,
+        "ROI_DOB": skip_dob,
+        "ROI_BLOOD": False,
+        "ROI_DATES": False,
+        "ROI_FAMILY": False,
+    }
+
+
 def _run_ocr_and_extract(*, front_key, back_key, document_type, total_started):
     """Shared OCR + deterministic extraction for identity documents.
 
@@ -161,6 +182,7 @@ def _run_ocr_and_extract(*, front_key, back_key, document_type, total_started):
         engine_t = time.monotonic()
         engine = get_ocr_engine()
         timing["engine_init_ms"] = int((time.monotonic() - engine_t) * 1000)
+        back_full_texts: list[str] = []
         for side, key in sides:
             t = time.monotonic()
             with private_identity_storage.open(key, "rb") as handle:
@@ -178,23 +200,41 @@ def _run_ocr_and_extract(*, front_key, back_key, document_type, total_started):
             timing[f"{side}_ocr_ms"] = int((time.monotonic() - t) * 1000)
             tag = "FRONT" if side == "front" else "BACK"
             for line in result.lines:
+                if side == "back" and line.text:
+                    back_full_texts.append(line.text)
                 side_lines.append(
                     extraction.SideLine(tag, line.text, line.confidence)
                 )
 
-        # Targeted ROI passes for the Iraqi National Card. These recover values
-        # the full-card Arabic pass misses: blood group, printed dates, family
-        # number and a clean MRZ read.
+        # ADAPTIVE targeted ROI passes for the Iraqi National Card.
+        #
+        # The full-card Arabic pass already feeds the MRZ parser directly
+        # (back lines), so a clean MRZ read from full OCR makes the ROI_MRZ
+        # crop redundant. ROI_DOB is likewise redundant when the MRZ already
+        # supplies a validated DOB. Skipping those two crops cuts a large
+        # share of the per-job OCR cost on well-scanned cards; poor scans
+        # still fall back to the ROI pass automatically (fields missing).
+        #
+        # ROI_BLOOD / ROI_DATES / ROI_FAMILY always run: the extractor relies
+        # on these targeted crops for blood group, printed dates and the
+        # family number, which the full-card Arabic pass does not reliably
+        # produce.
         if document_type == "UNIFIED_NATIONAL_CARD" and images.get("back"):
             latin_t = time.monotonic()
             latin_engine = get_latin_ocr_engine()
             timing["latin_engine_init_ms"] = int(
                 (time.monotonic() - latin_t) * 1000
             )
+            mrz_probe = mrz.parse_iraqi_national_card_mrz(back_full_texts)
+            skip_plan = _adaptive_roi_plan(mrz_probe)
             region_extractor = IraqiNationalCardRegionExtractor(
                 arabic_engine=engine, latin_engine=latin_engine
             )
             for tag, spec in IRAQI_REGIONS.items():
+                if skip_plan.get(tag):
+                    timing[f"{tag.lower()}_ms"] = 0
+                    timing[f"{tag.lower()}_skipped"] = True
+                    continue
                 region_image = images[spec["side"].lower()]
                 t = time.monotonic()
                 side_lines.extend(
@@ -299,6 +339,7 @@ def extract_identity_document(self, job_uuid):
         "back_storage_read_ms=%s back_decode_ms=%s back_ocr_ms=%s "
         "roi_blood_ms=%s roi_dates_ms=%s roi_dob_ms=%s "
         "roi_family_ms=%s roi_mrz_ms=%s "
+        "roi_mrz_skipped=%s roi_dob_skipped=%s "
         "parse_ms=%s total_ms=%s line_count=%s fields=%s mrz=%s",
         job_uuid,
         job.document_type,
@@ -318,6 +359,8 @@ def extract_identity_document(self, job_uuid):
         timing.get("roi_dob_ms"),
         timing.get("roi_family_ms"),
         timing.get("roi_mrz_ms"),
+        bool(timing.get("roi_mrz_skipped")),
+        bool(timing.get("roi_dob_skipped")),
         parse_ms,
         total_ms,
         line_count,

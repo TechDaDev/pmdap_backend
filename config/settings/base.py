@@ -299,6 +299,39 @@ CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:63
 CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 30 * 60
 
+# Privacy-safe app logger config. ONLY identities + registration emit INFO
+# summaries (job UUID, timings, confidence buckets — never OCR text, names,
+# DOB, identifiers, storage keys or tokens). Everything else stays at Django
+# defaults so no sensitive request/response logging is enabled.
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "[{asctime}] {levelname} {name} {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        },
+    },
+    "loggers": {
+        "identities": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "registration": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+    },
+}
+
 # Belt-and-suspenders expiry sweep for abandoned identity extraction jobs.
 # The worker also schedules per-job delayed cleanup (countdown = staging TTL),
 # so this beat entry is only needed if a `celery beat` process is deployed.
