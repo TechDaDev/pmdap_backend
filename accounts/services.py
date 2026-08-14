@@ -14,7 +14,23 @@ def normalize_email(email):
 
 
 @transaction.atomic
-def register_account(*, email, password, patient, phone=""):
+def register_account(
+    *, email, password, patient=None, phone="", registration_identity=None
+):
+    if registration_identity is not None:
+        from registration.services import finalize_scan_first_registration
+
+        return finalize_scan_first_registration(
+            email=email,
+            password=password,
+            phone=phone,
+            registration_identity=registration_identity,
+        )
+    if patient is None:
+        raise serializers.ValidationError(
+            {"patient": ["Patient demographics are required for manual registration."]}
+        )
+
     user_model = get_user_model()
     try:
         user = user_model.objects.create_user(

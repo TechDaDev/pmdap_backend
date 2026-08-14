@@ -9,6 +9,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from accounts.services import issue_tokens, normalize_email, register_account
 from common.exceptions import AccountUnavailable
 from patients.serializers import PatientProfileInputSerializer
+from registration.serializers import RegistrationIdentitySerializer
 
 User = get_user_model()
 
@@ -42,7 +43,13 @@ class RegisterSerializer(RejectUnknownFieldsMixin, serializers.Serializer):
     email = serializers.EmailField()
     phone = serializers.CharField(required=False, allow_blank=True, max_length=32)
     password = serializers.CharField(write_only=True, trim_whitespace=False)
-    patient = PatientProfileInputSerializer(write_only=True)
+    # LEGACY manual registration (patient demographics supplied directly).
+    patient = PatientProfileInputSerializer(write_only=True, required=False)
+    # SCAN-FIRST registration (capability-bound identity session + confirmed
+    # human-reviewed demographic values). Exactly one of the two is allowed.
+    registration_identity = RegistrationIdentitySerializer(
+        write_only=True, required=False
+    )
 
     def validate_email(self, value):
         value = normalize_email(value)
@@ -54,6 +61,13 @@ class RegisterSerializer(RejectUnknownFieldsMixin, serializers.Serializer):
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
+        has_legacy = "patient" in attrs
+        has_scan_first = "registration_identity" in attrs
+        if has_legacy == has_scan_first:
+            raise serializers.ValidationError(
+                "Provide exactly one of 'patient' (manual) or "
+                "'registration_identity' (scan-first)."
+            )
         try:
             validate_password(attrs["password"], user=User(email=attrs["email"]))
         except DjangoValidationError as exc:
