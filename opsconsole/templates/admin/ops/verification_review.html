@@ -1,11 +1,20 @@
 {% extends "admin/base_site.html" %}
 {% load i18n static %}
 
+{% block extrastyle %}{{ block.super }}<link rel="stylesheet" href="{% static "admin/ops/css/ops.css" %}">{% endblock %}
+
 {% block title %}{% translate 'Review identity document' %} | {{ site_title|default:_('Django site admin') }}{% endblock %}
 
 {% block content %}
 <h1>{% translate 'Review identity document' %}</h1>
-<p class="quiet">{{ document.get_document_type_display }} &middot; submitted {{ document.created_at|date:"Y-m-d H:i" }}</p>
+<p class="quiet">
+  {% if document.verification_status == 'PENDING' and document.status == 'CURRENT' %}
+    <span class="ops-status-badge ops-status-pending">{% translate 'Pending verification' %}</span>
+  {% else %}
+    <span class="ops-status-badge">{{ document.get_verification_status_display }}</span>
+  {% endif %}
+  &middot; {{ document.get_document_type_display }} &middot; submitted {{ document.created_at|date:"Y-m-d H:i" }}
+</p>
 
 {% if messages %}
   <ul class="messagelist">
@@ -77,13 +86,13 @@
   </table>
 </div>
 
-{% if document.verification_status == 'PENDING' and document.status == 'CURRENT' %}
-  <div style="display:flex; gap:12px">
+{% if document.verification_status == 'PENDING' and document.status == 'CURRENT' and can_mutate %}
+  <div class="ops-actions">
     <form method="get" action="{% url 'admin:ops_verification_approve' document.pk %}">
-      <input type="submit" class="button" value="{% translate 'Approve identity' %}" style="background:#417690">
+      <input type="submit" class="ops-cta" value="{% translate 'Approve identity' %}">
     </form>
     <form method="get" action="{% url 'admin:ops_verification_reject' document.pk %}">
-      <input type="submit" class="button" value="{% translate 'Reject identity' %}" style="background:#ba2121">
+      <input type="submit" class="ops-cta ops-cta-danger" value="{% translate 'Reject identity' %}">
     </form>
   </div>
 {% endif %}

@@ -1,0 +1,112 @@
+/* PMDAP Operations dashboard + verification pages.
+   Uses Django admin CSS variables so dark/light mode stays consistent. */
+
+.ops-subtitle {
+  color: var(--body-quiet-color, #666);
+  font-size: 0.95em;
+  margin-top: 0;
+}
+
+.ops-dashboard {
+  margin-bottom: 24px;
+}
+
+.ops-cards {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.ops-card {
+  flex: 1 1 280px;
+  border: 1px solid var(--hairline-color, #e8e8e8);
+  border-radius: 6px;
+  background: var(--body-bg, #fff);
+  padding: 14px 16px;
+}
+
+.ops-dashboard-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ops-card-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.ops-card-icon {
+  font-size: 1.6em;
+  line-height: 1;
+}
+
+.ops-card-title h2 {
+  margin: 0;
+  font-size: 1.1em;
+  color: var(--body-fg, #333);
+}
+
+.ops-card-sub {
+  margin: 4px 0 0;
+  color: var(--body-quiet-color, #666);
+  font-size: 0.9em;
+}
+
+.ops-cta {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 7px 14px;
+  background: var(--primary, #417690);
+  color: var(--button-fg, #fff);
+  border-radius: 4px;
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.9em;
+  align-self: flex-start;
+}
+
+.ops-cta:hover {
+  background: var(--primary-fg, #205067);
+}
+
+.ops-apps-heading {
+  margin: 8px 0 4px;
+  font-size: 1.05em;
+  color: var(--body-fg, #333);
+}
+
+/* Verification review action buttons */
+.ops-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 16px 0;
+}
+
+.ops-actions .ops-cta-danger {
+  background: var(--error-bg, #ba2121);
+}
+
+.ops-actions form {
+  margin: 0;
+}
+
+.ops-status-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 3px;
+  font-weight: 700;
+  font-size: 0.9em;
+}
+
+.ops-status-pending {
+  background: #f0d264;
+  color: #333;
+}
+
+.ops-reason-required {
+  color: var(--error-bg, #ba2121);
+  font-weight: 600;
+}

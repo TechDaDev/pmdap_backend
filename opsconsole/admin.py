@@ -15,6 +15,8 @@ The replacement must happen before every other app's ``admin.py`` is imported
 during autodiscovery, so this app is listed first in ``PROJECT_APPS``.
 """
 
+import time
+
 from django.contrib.admin import AdminSite, sites as admin_sites
 from django.urls import path
 import django.contrib.admin as admin_mod
@@ -26,7 +28,7 @@ from opsconsole import verification_views
 class OpsAdminSite(AdminSite):
     site_header = "PMDAP Operations"
     site_title = "PMDAP Operations"
-    index_title = "PMDAP Operations Console"
+    index_title = "Operations Console"
     index_template = "admin/ops/index.html"
 
     def get_urls(self):
@@ -78,6 +80,7 @@ class OpsAdminSite(AdminSite):
     def index(self, request, extra_context=None):
         """Add operations-console cards to the admin dashboard."""
         from identities.models import IdentityDocument
+        from identities.permissions import can_verify_identity
 
         context = {
             "ops_pending_count": IdentityDocument.objects.filter(
@@ -86,10 +89,37 @@ class OpsAdminSite(AdminSite):
             ).count(),
             "ops_monitor_url": "admin:ops_server_monitor",
             "ops_verification_url": "admin:ops_verification_queue",
+            "ops_can_verify": can_verify_identity(request.user),
+            "ops_server": _server_snapshot(),
         }
         if extra_context:
             context.update(extra_context)
         return super().index(request, context)
+
+
+def _server_snapshot():
+    """Non-blocking, defensive service status for the admin home card.
+
+    Never raises: if the Railway metrics collector is disabled, Redis is down,
+    or the snapshot is stale, the card simply renders "Metrics stale".
+    """
+    try:
+        from opsconsole import buffer
+
+        status = buffer.get_collector_status()
+        if not status:
+            return None
+        services = [
+            name for name in (status.get("services") or "").split(",") if name
+        ]
+        state = status.get("status") or "STALE"
+        return {
+            "stale": state != "OK",
+            "services": sorted(services),
+            "updated": int(status.get("updated_at") or 0),
+        }
+    except Exception:  # pragma: no cover - defensive, admin home must not break
+        return None
 
 
 ops_site = OpsAdminSite(name="admin")

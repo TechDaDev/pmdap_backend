@@ -1,7 +1,7 @@
 {% extends "admin/base_site.html" %}
 {% load i18n static %}
 
-{% block extrastyle %}{{ block.super }}<link rel="stylesheet" href="{% static "admin/css/dashboard.css" %}">{% endblock %}
+{% block extrastyle %}{{ block.super }}<link rel="stylesheet" href="{% static "admin/css/dashboard.css" %}"><link rel="stylesheet" href="{% static "admin/ops/css/ops.css" %}">{% endblock %}
 
 {% block coltype %}colMS{% endblock %}
 
@@ -21,21 +21,40 @@
     </ul>
   {% endif %}
 
-  <h1>PMDAP Operations Console</h1>
+  <p class="ops-subtitle">Patient verification and infrastructure operations</p>
 
   <div class="module ops-dashboard">
-    <h2>Operations</h2>
     <div class="ops-cards">
-      <div class="ops-card">
-        <h3><a href="{% url ops_verification_url %}">Identity verification queue</a></h3>
-        <p class="quiet">{{ ops_pending_count }} pending document{{ ops_pending_count|pluralize }} awaiting verification.</p>
+      <div class="ops-card ops-dashboard-card">
+        <div class="ops-card-title">
+          <span class="ops-card-icon">🪪</span>
+          <div>
+            <h2>Identity verification</h2>
+            <p class="ops-card-sub">{{ ops_pending_count }} pending document{{ ops_pending_count|pluralize }}</p>
+          </div>
+        </div>
+        <a class="ops-cta" href="{% url ops_verification_url %}">Open verification queue</a>
       </div>
-      <div class="ops-card">
-        <h3><a href="{% url ops_monitor_url %}">Railway server monitor</a></h3>
-        <p class="quiet">Live CPU, memory, disk and network for all deployed services.</p>
+      <div class="ops-card ops-dashboard-card">
+        <div class="ops-card-title">
+          <span class="ops-card-icon">📊</span>
+          <div>
+            <h2>Server monitor</h2>
+            <p class="ops-card-sub">
+              {% if ops_server and not ops_server.stale %}
+                Backend Online · OCR Worker Online · PostgreSQL Online · Redis Online
+              {% else %}
+                Metrics stale
+              {% endif %}
+            </p>
+          </div>
+        </div>
+        <a class="ops-cta" href="{% url ops_monitor_url %}">Open server monitor</a>
       </div>
     </div>
   </div>
+
+  <h2 class="ops-apps-heading">Data administration</h2>
 
   {% include "admin/app_list.html" with app_list=app_list show_changelinks=True %}
 </div>

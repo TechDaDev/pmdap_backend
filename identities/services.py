@@ -27,6 +27,7 @@ from identities.models import (
     IdentityExtractionJob,
     IdentityFile,
 )
+from identities.permissions import can_verify_identity
 from identities.storage import private_identity_storage
 from patients.models import PatientProfile
 
@@ -436,7 +437,7 @@ def _finalize_job_cleanup(job):
 
 
 def approve_identity_document(*, document, agent):
-    if agent.role != User.Role.IDENTITY_VERIFICATION_AGENT:
+    if not can_verify_identity(agent):
         from identities.exceptions import VerificationAgentRequired
 
         raise VerificationAgentRequired()
@@ -521,7 +522,7 @@ def approve_identity_document(*, document, agent):
 
 
 def reject_identity_document(*, document, agent, reason):
-    if agent.role != User.Role.IDENTITY_VERIFICATION_AGENT:
+    if not can_verify_identity(agent):
         from identities.exceptions import VerificationAgentRequired
 
         raise VerificationAgentRequired()

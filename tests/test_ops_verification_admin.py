@@ -4,8 +4,8 @@ Covers the staff-only queue, review, approve/reject mutations (through the
 domain services), private image endpoints, and authorization rules:
   * anonymous                -> redirect to admin login
   * non-staff (patient)      -> redirect to admin login
-  * staff without agent role -> 403 on every page
-  * superuser                -> may VIEW queue/review/images but NOT mutate
+  * staff without agent role -> 403 on every page (including approve/reject)
+  * superuser                -> may VIEW queue/review/images AND APPROVE/REJECT
   * verification agent       -> full access
 """
 
@@ -136,8 +136,14 @@ class TestAuthz:
         login(client, user)
         response = client.get(reverse("admin:index"))
         assert response.status_code == 200
-        assert b"PMDAP Operations Console" in response.content
-        assert b"Identity verification queue" in response.content
+        # One hierarchy: header "PMDAP Operations", content h1 "Operations
+        # Console" rendered exactly once (old duplicate h1 removed).
+        assert b"PMDAP Operations" in response.content
+        assert b"<h1>Operations Console</h1>" in response.content
+        assert b"PMDAP Operations Console" not in response.content
+        assert b"Identity verification" in response.content
+        assert b"Open verification queue" in response.content
+        assert b"Server monitor" in response.content
 
     def test_agent_can_view_queue(self, client):
         user = make_user(role=User.Role.IDENTITY_VERIFICATION_AGENT, staff=True)
@@ -272,7 +278,7 @@ class TestApprove:
         assert replacement.verification_status == IdentityDocument.VerificationStatus.VERIFIED
         assert previous.status == IdentityDocument.LifecycleStatus.REPLACED
 
-    def test_superuser_cannot_mutate(self, client):
+    def test_superuser_can_mutate(self, client):
         doc, _ = make_identity_document()
         root = UserFactory(email="root2@example.com")
         root.is_staff = True
@@ -280,7 +286,85 @@ class TestApprove:
         root.save(update_fields=("is_staff", "is_superuser"))
         login(client, root)
         response = client.post(reverse("admin:ops_verification_approve", args=[doc.pk]))
-        assert response.status_code == 403
+        assert response.status_code == 302
+        doc.refresh_from_db()
+        assert doc.verification_status == IdentityDocument.VerificationStatus.VERIFIED
+        assert doc.verified_by_id == root.pk
+        # Audit + event actor is the real superuser (role untouched).
+        assert (
+            AuditLog.objects.filter(
+                action=AuditLog.Action.IDENTITY_DOCUMENT_VERIFIED,
+                resource_uuid=doc.uuid,
+                actor=root,
+            ).exists()
+        )
+        assert (
+            IdentityDocumentEvent.objects.filter(
+                document=doc, event_type=IdentityDocumentEvent.EventType.VERIFIED, actor=root
+            ).exists()
+        )
+        doc.patient.refresh_from_db()
+        assert doc.patient.identity_status == PatientProfile.IdentityStatus.VERIFIED
+        assert root.role == User.Role.PATIENT  # role never mutated
+
+    def test_superuser_can_reject(self, client):
+        doc, _ = make_identity_document()
+        root = UserFactory(email="root-reject@example.com")
+        root.is_staff = True
+        root.is_superuser = True
+        root.save(update_fields=("is_staff", "is_superuser"))
+        login(client, root)
+        response = client.post(
+            reverse("admin:ops_verification_reject", args=[doc.pk]),
+            {"reason": "synthetic test rejection"},
+        )
+        assert response.status_code == 302
+        doc.refresh_from_db()
+        assert doc.verification_status == IdentityDocument.VerificationStatus.REJECTED
+        assert doc.status == IdentityDocument.LifecycleStatus.REVOKED
+        assert doc.rejection_reason == "synthetic test rejection"
+        assert doc.verified_by_id == root.pk
+        doc.patient.refresh_from_db()
+        assert doc.patient.identity_status == PatientProfile.IdentityStatus.REJECTED
+
+    def test_superuser_can_stream_images_and_review(self, client):
+        doc, _ = make_identity_document()
+        root = UserFactory(email="root-img@example.com")
+        root.is_staff = True
+        root.is_superuser = True
+        root.save(update_fields=("is_staff", "is_superuser"))
+        login(client, root)
+        assert (
+            client.get(reverse("admin:ops_verification_review", args=[doc.pk])).status_code
+            == 200
+        )
+        assert (
+            client.get(reverse("admin:ops_identity_image_front", args=[doc.pk])).status_code
+            == 200
+        )
+
+    def test_ordinary_staff_cannot_approve(self, client):
+        doc, _ = make_identity_document()
+        staff = make_user(staff=True, email="staff-approve@example.com")
+        login(client, staff)
+        assert (
+            client.post(reverse("admin:ops_verification_approve", args=[doc.pk])).status_code
+            == 403
+        )
+        doc.refresh_from_db()
+        assert doc.verification_status == IdentityDocument.VerificationStatus.PENDING
+
+    def test_ordinary_staff_cannot_reject(self, client):
+        doc, _ = make_identity_document()
+        staff = make_user(staff=True, email="staff-reject@example.com")
+        login(client, staff)
+        assert (
+            client.post(
+                reverse("admin:ops_verification_reject", args=[doc.pk]),
+                {"reason": "nope"},
+            ).status_code
+            == 403
+        )
         doc.refresh_from_db()
         assert doc.verification_status == IdentityDocument.VerificationStatus.PENDING
 

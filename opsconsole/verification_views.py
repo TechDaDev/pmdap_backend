@@ -24,12 +24,12 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
 
-from accounts.models import User
 from identities.exceptions import (
     IdentityTransitionConflict,
     VerificationAgentRequired,
 )
 from identities.models import IdentityDocument
+from identities.permissions import can_verify_identity
 from identities.services import approve_identity_document, reject_identity_document
 from opsconsole.context import admin_context
 
@@ -40,13 +40,11 @@ _CURRENT = IdentityDocument.LifecycleStatus.CURRENT
 
 
 def _can_view_verification(user):
-    return user.is_active and (
-        user.is_superuser or user.role == User.Role.IDENTITY_VERIFICATION_AGENT
-    )
+    return can_verify_identity(user)
 
 
 def _can_mutate_verification(user):
-    return user.is_active and user.role == User.Role.IDENTITY_VERIFICATION_AGENT
+    return can_verify_identity(user)
 
 
 def _pending_queryset():
@@ -81,7 +79,12 @@ def verification_queue(request):
     return render(
         request,
         "admin/ops/verification_queue.html",
-        admin_context(request, documents=documents, count=len(documents)),
+        admin_context(
+            request,
+            documents=documents,
+            count=len(documents),
+            can_mutate=_can_mutate_verification(request.user),
+        ),
     )
 
 
@@ -96,7 +99,12 @@ def verification_review(request, document_uuid):
     return render(
         request,
         "admin/ops/verification_review.html",
-        admin_context(request, document=document, patient=document.patient),
+        admin_context(
+            request,
+            document=document,
+            patient=document.patient,
+            can_mutate=_can_mutate_verification(request.user),
+        ),
     )
 
 
