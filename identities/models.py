@@ -48,6 +48,10 @@ class IdentityDocument(UUIDModel):
     document_number = models.CharField(max_length=128)
     national_number = models.CharField(max_length=128, blank=True)
     family_number = models.CharField(max_length=128, blank=True)
+    # Short front-side H... code printed on the Iraqi National Card. A distinct
+    # identifier from document_number / national_number / family_number; kept
+    # in its own column so it survives to human verification untouched.
+    unique_card_body_number = models.CharField(max_length=128, blank=True, default="")
     issuing_country = models.CharField(max_length=2)
     issue_date = models.DateField(null=True, blank=True)
     expiry_date = models.DateField(null=True, blank=True)

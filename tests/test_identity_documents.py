@@ -38,6 +38,7 @@ DETAIL_FIELDS = SUMMARY_FIELDS | {
     "document_number",
     "national_number",
     "family_number",
+    "unique_card_body_number",
     "verified_at",
     "rejection_reason",
     "available_images",

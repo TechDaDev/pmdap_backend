@@ -140,45 +140,27 @@ def _expire_job(job):
     job.delete()
 
 
-@shared_task(
-    bind=True,
-    name="identities.extract_identity_document",
-    queue="ocr",
-    soft_time_limit=settings.OCR_TASK_SOFT_TIME_LIMIT,
-    time_limit=settings.OCR_TASK_TIME_LIMIT,
-)
-def extract_identity_document(self, job_uuid):
-    # Claim the job inside a short transaction; OCR runs outside it so the row
-    # lock / DB connection are not held for the whole inference.
-    with transaction.atomic():
-        try:
-            job = IdentityExtractionJob.objects.select_for_update().get(
-                pk=job_uuid
-            )
-        except IdentityExtractionJob.DoesNotExist:
-            return None
-        if job.status != IdentityExtractionJob.Status.PENDING:
-            return None
-        job.status = IdentityExtractionJob.Status.PROCESSING
-        job.save(update_fields=["status", "updated_at"])
+def _run_ocr_and_extract(*, front_key, back_key, document_type, total_started):
+    """Shared OCR + deterministic extraction for identity documents.
 
-    keys = _staging_keys(job)
+    Reads staged private images, runs the full-card Arabic pass plus targeted
+    ROI passes (Iraqi National Card), then the deterministic extractor.
+
+    Returns (payload, timing, line_count). Raises OCREngineUnavailableError
+    when the OCR runtime is unavailable; other exceptions propagate so the
+    caller decides job-failure handling. Extracted values are returned only in
+    memory — never logged here.
+    """
     side_lines = []
     images = {}
-    total_started = time.monotonic()
-    queue_wait_ms = max(
-        0, int((timezone.now() - job.created_at).total_seconds() * 1000)
-    )
-    created_before = engine_created_count()
-    latin_created_before = latin_engine_created_count()
     timing = {}
+    sides = [("front", front_key)] if front_key else []
+    if back_key:
+        sides.append(("back", back_key))
     try:
         engine_t = time.monotonic()
         engine = get_ocr_engine()
         timing["engine_init_ms"] = int((time.monotonic() - engine_t) * 1000)
-        sides = [("front", keys[0])] if keys else []
-        if len(keys) > 1:
-            sides.append(("back", keys[1]))
         for side, key in sides:
             t = time.monotonic()
             with private_identity_storage.open(key, "rb") as handle:
@@ -203,7 +185,7 @@ def extract_identity_document(self, job_uuid):
         # Targeted ROI passes for the Iraqi National Card. These recover values
         # the full-card Arabic pass misses: blood group, printed dates, family
         # number and a clean MRZ read.
-        if job.document_type == "UNIFIED_NATIONAL_CARD" and images.get("back"):
+        if document_type == "UNIFIED_NATIONAL_CARD" and images.get("back"):
             latin_t = time.monotonic()
             latin_engine = get_latin_ocr_engine()
             timing["latin_engine_init_ms"] = int(
@@ -219,12 +201,65 @@ def extract_identity_document(self, job_uuid):
                     region_extractor.extract_region(region_image, tag, spec)
                 )
                 timing[f"{tag.lower()}_ms"] = int((time.monotonic() - t) * 1000)
-
+    finally:
         for image in images.values():
             try:
                 image.close()
             except Exception:  # pragma: no cover - defensive close
                 pass
+
+    t = time.monotonic()
+    fields, warnings, mrz_summary = extraction.extract_identity(
+        document_type, side_lines
+    )
+    timing["parse_ms"] = int((time.monotonic() - t) * 1000)
+    timing["total_ms"] = int((time.monotonic() - total_started) * 1000)
+    payload = {
+        "document_type": document_type,
+        "extractor_version": extraction.EXTRACTOR_VERSION,
+        "fields": fields,
+        "warnings": warnings,
+        "mrz": mrz_summary,
+    }
+    return payload, timing, len(side_lines)
+
+
+@shared_task(
+    bind=True,
+    name="identities.extract_identity_document",
+    queue="ocr",
+    soft_time_limit=settings.OCR_TASK_SOFT_TIME_LIMIT,
+    time_limit=settings.OCR_TASK_TIME_LIMIT,
+)
+def extract_identity_document(self, job_uuid):
+    # Claim the job inside a short transaction; OCR runs outside it so the row
+    # lock / DB connection are not held for the whole inference.
+    with transaction.atomic():
+        try:
+            job = IdentityExtractionJob.objects.select_for_update().get(
+                pk=job_uuid
+            )
+        except IdentityExtractionJob.DoesNotExist:
+            return None
+        if job.status != IdentityExtractionJob.Status.PENDING:
+            return None
+        job.status = IdentityExtractionJob.Status.PROCESSING
+        job.save(update_fields=["status", "updated_at"])
+
+    keys = _staging_keys(job)
+    total_started = time.monotonic()
+    queue_wait_ms = max(
+        0, int((timezone.now() - job.created_at).total_seconds() * 1000)
+    )
+    created_before = engine_created_count()
+    latin_created_before = latin_engine_created_count()
+    try:
+        payload, timing, line_count = _run_ocr_and_extract(
+            front_key=job.front_key,
+            back_key=job.back_key,
+            document_type=job.document_type,
+            total_started=total_started,
+        )
     except OCREngineUnavailableError:
         _cleanup_staging(keys)
         _finish(
@@ -245,19 +280,10 @@ def extract_identity_document(self, job_uuid):
         )
         return None
 
-    t = time.monotonic()
-    fields, warnings, mrz_summary = extraction.extract_identity(
-        job.document_type, side_lines
-    )
-    parse_ms = int((time.monotonic() - t) * 1000)
-    total_ms = int((time.monotonic() - total_started) * 1000)
-    payload = {
-        "document_type": job.document_type,
-        "extractor_version": extraction.EXTRACTOR_VERSION,
-        "fields": fields,
-        "warnings": warnings,
-        "mrz": mrz_summary,
-    }
+    fields = payload["fields"]
+    mrz_summary = payload["mrz"]
+    parse_ms = timing.get("parse_ms", 0)
+    total_ms = timing.get("total_ms", 0)
 
     # Safe log: job, type, status, timings, line count, field names +
     # confidence buckets only. NEVER text, identity values or storage keys.
@@ -294,7 +320,7 @@ def extract_identity_document(self, job_uuid):
         timing.get("roi_mrz_ms"),
         parse_ms,
         total_ms,
-        len(side_lines),
+        line_count,
         bucket_summary,
         mrz_summary.get("detected"),
     )

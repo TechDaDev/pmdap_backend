@@ -96,6 +96,9 @@ class IdentityDocumentInputSerializer(RejectUnknownFieldsMixin, serializers.Seri
     family_number = serializers.CharField(
         max_length=128, required=False, allow_blank=True, default=""
     )
+    unique_card_body_number = serializers.CharField(
+        max_length=128, required=False, allow_blank=True, default=""
+    )
     issuing_country = serializers.RegexField(r"^[A-Za-z]{2}$", required=False)
     issue_date = serializers.DateField(required=False, allow_null=True)
     expiry_date = serializers.DateField(required=False, allow_null=True)
@@ -199,6 +202,7 @@ class IdentityDocumentDetailSerializer(IdentityDocumentSummarySerializer):
             "document_number",
             "national_number",
             "family_number",
+            "unique_card_body_number",
             "verified_at",
             "rejection_reason",
             "available_images",
