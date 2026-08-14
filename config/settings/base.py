@@ -36,6 +36,7 @@ PROJECT_APPS = [
     # other app registers its models with @admin.register.
     "opsconsole.apps.OpsConsoleConfig",
     "accounts.apps.AccountsConfig",
+    "registration.apps.RegistrationConfig",
     "patients.apps.PatientsConfig",
     "identities.apps.IdentitiesConfig",
     "guardians.apps.GuardiansConfig",
@@ -206,6 +207,21 @@ OCR_TASK_TIME_LIMIT = int(os.getenv("OCR_TASK_TIME_LIMIT", str(30 * 60)))
 IDENTITY_STAGING_TTL_SECONDS = int(
     os.getenv("IDENTITY_STAGING_TTL_SECONDS", str(30 * 60))
 )
+# Pre-registration identity extraction session lifetime. The public client
+# uploads National Card images once, OCR runs on the worker, then the user
+# reviews and completes registration. Jobs are short-lived; abandoned jobs are
+# swept by a Celery cleanup task.
+REGISTRATION_IDENTITY_TTL_SECONDS = int(
+    os.getenv("REGISTRATION_IDENTITY_TTL_SECONDS", str(30 * 60))
+)
+# How long the pre-registration extraction RESULT stays in the cache. Kept in
+# step with the staging TTL so a review session cannot outlive its staging.
+REGISTRATION_IDENTITY_CACHE_TTL_SECONDS = int(
+    os.getenv(
+        "REGISTRATION_IDENTITY_CACHE_TTL_SECONDS",
+        str(30 * 60),
+    )
+)
 DATE_CONTEXT_MAX_CHARS = int(os.getenv("DATE_CONTEXT_MAX_CHARS", "160"))
 DATE_SUGGESTION_MIN_SCORE = float(os.getenv("DATE_SUGGESTION_MIN_SCORE", "0.75"))
 DATE_SUGGESTION_TIE_TOLERANCE = float(
@@ -236,6 +252,10 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         "auth_register": "5/hour",
         "auth_login": "10/minute",
+        # Public pre-registration OCR runs expensive PaddleOCR: aggressive,
+        # dedicated anonymous scopes.
+        "registration_identity_extract": "10/minute",
+        "registration_identity_poll": "60/minute",
         "account_claim_submit": "5/hour",
         "account_claim_activation": "10/hour",
         "medical_document_upload": "20/hour",
