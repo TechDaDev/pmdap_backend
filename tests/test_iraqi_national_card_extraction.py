@@ -49,8 +49,8 @@ def _front(name="الاسم اناو TESTNAME",
 
 
 def _card_lines(*, blood=("ROI_BLOOD", "O+"), dob=("ROI_DOB", "1990/05/17"),
-                family=("ROI_FAMILY", "TESTFAMILY123456"), mrz=True):
-    lines = _front()
+                family=("ROI_FAMILY", "TESTFAMILY123456"), mrz=True, lines=None):
+    lines = list(lines) if lines is not None else _front()
     lines.append(extraction.SideLine("BACK", "تأريخ الولادة ارؤزى لهدايك بوون", 0.8))
     lines.append(extraction.SideLine("BACK", "الرقملعانليمارى خاني", 0.7))
     if blood:
@@ -466,3 +466,168 @@ def test_region_definitions_are_normalized_fractions():
         assert spec["side"] in ("FRONT", "BACK")
         assert spec["engine"] in ("arabic", "latin")
         assert spec["scale"] >= 1
+
+
+# --------------------------------------------------------------------------- #
+# Multi-sample label robustness (second real-card findings, SYNTHETIC values)
+# --------------------------------------------------------------------------- #
+
+def _front_only(*lines):
+    return [
+        extraction.SideLine("FRONT", text, conf) for text, conf in lines
+    ] + [
+        extraction.SideLine("FRONT", "الجنس اركمز ذكر", 0.9),
+        extraction.SideLine("FRONT", "123456789012", 0.9),
+        extraction.SideLine("FRONT", "G12345678", 0.9),
+    ]
+
+
+# --- Name: same-line multilingual / glued connector / split-line ---
+
+@pytest.mark.parametrize("name_line", [
+    "الاسم / ناو : TESTNAME",
+    "الاسم ناو TESTNAME",
+    "ناو: TESTNAME",
+    "الاسم ناوTESTNAME",  # connector glued to the value
+])
+def test_name_label_variants_multilingual(name_line):
+    fields, _, _ = _run(_front_only((name_line, 0.9), ("باوك TESTFATHER", 0.9)))
+    assert fields["name"]["value"] == "TESTNAME"
+
+
+def test_name_split_line_label_then_value():
+    fields, _, _ = _run(_front_only(
+        ("الاسم", 0.9),
+        ("TESTNAME", 0.9),
+        ("باوك TESTFATHER", 0.9),
+    ))
+    assert fields["name"]["value"] == "TESTNAME"
+
+
+def test_name_label_stuck_to_value():
+    # OCR merges label and value with no separator at all.
+    fields, _, _ = _run(_front_only(("الاسمTESTNAME", 0.9), ("باوك TESTFATHER", 0.9)))
+    assert fields["name"]["value"] == "TESTNAME"
+
+
+# --- Father: Kurdish label, glued, split-line ---
+
+@pytest.mark.parametrize("father_line", [
+    "الاب / باوك : TESTFATHER",
+    "باوك: TESTFATHER",
+    "الاب باوك TESTFATHER",
+    "باوكTESTFATHER",  # Kurdish label glued to the value
+])
+def test_father_label_variants(father_line):
+    fields, _, _ = _run(_front_only(("الاسم اناو TESTNAME", 0.9), (father_line, 0.9)))
+    assert fields["father_name"]["value"] == "TESTFATHER"
+
+
+def test_father_split_line_label_then_value():
+    fields, _, _ = _run(_front_only(
+        ("الاسم اناو TESTNAME", 0.9),
+        ("باوك", 0.9),
+        ("TESTFATHER", 0.9),
+    ))
+    assert fields["father_name"]["value"] == "TESTFATHER"
+
+
+def test_father_split_line_must_not_grab_grandfather():
+    # Label line then a grandfather-labeled line: the grandfather must win.
+    fields, _, _ = _run(_front_only(
+        ("الاسم اناو TESTNAME", 0.9),
+        ("الاب", 0.9),
+        ("ابابيرTESTGRAND", 0.9),
+    ))
+    assert fields["grandfather_name"]["value"] == "TESTGRAND"
+    assert "father_name" not in fields or fields["father_name"]["value"] != "TESTGRAND"
+
+
+def test_maternal_grandfather_never_populates_grandfather():
+    # Kurdish father chain, mother, then a maternal grandfather row.
+    fields, _, _ = _run(_front_only(
+        ("الاسم ناوTESTNAME", 0.9),
+        ("باوكTESTFATHER", 0.9),
+        ("ابابيرPATERNALGRAND", 0.9),
+        ("ردايك TESTMOTHER", 0.9),
+        ("بابير MATERNALGRAND", 0.9),
+    ))
+    assert fields["grandfather_name"]["value"] == "PATERNALGRAND"
+    assert fields["grandfather_name"]["value"] != "MATERNALGRAND"
+    assert "MATERNALGRAND" not in [f["value"] for f in fields.values()]
+
+
+# --- Unique card body number: prefix-agnostic + FRONT/MRZ cross-check ---
+
+@pytest.mark.parametrize("prefix", ["A", "G", "H", "Z"])
+def test_body_number_any_letter_prefix(prefix):
+    body = f"{prefix}12345678"
+    lines = _front()
+    lines[10] = extraction.SideLine("FRONT", body, 0.9)
+    fields, _, _ = _run(_card_lines(lines=lines, mrz=False))
+    assert fields["unique_card_body_number"]["value"] == body
+
+
+def test_body_number_front_only():
+    lines = _front()
+    lines[10] = extraction.SideLine("FRONT", "G41421961", 0.9)
+    fields, _, _ = _run(_card_lines(lines=lines, mrz=False))
+    assert fields["unique_card_body_number"]["value"] == "G41421961"
+    assert "cross_check" not in fields["unique_card_body_number"]
+
+
+def test_body_number_mrz_only():
+    # Front OCR misses the body number; the MRZ line 1 carries it.
+    lines = _front()
+    lines[10] = extraction.SideLine("FRONT", "noise here", 0.9)
+    for ln in _iraqi_mrz_lines(doc="G41421961"):
+        lines.append(extraction.SideLine("ROI_MRZ", ln, 0.9))
+    fields, _, _ = _run(lines)
+    assert fields["unique_card_body_number"]["value"] == "G41421961"
+    assert fields["unique_card_body_number"]["source"] == "MRZ"
+
+
+def test_body_number_front_mrz_agree():
+    lines = _front()
+    lines[10] = extraction.SideLine("FRONT", "G41421961", 0.9)
+    for ln in _iraqi_mrz_lines(doc="G41421961"):
+        lines.append(extraction.SideLine("ROI_MRZ", ln, 0.9))
+    fields, _, _ = _run(lines)
+    assert fields["unique_card_body_number"]["value"] == "G41421961"
+    assert fields["unique_card_body_number"]["cross_check"] == "MRZ_AGREE"
+    assert fields["unique_card_body_number"]["confidence"] >= 0.9
+
+
+def test_body_number_front_mrz_mismatch_warns():
+    lines = _front()
+    lines[10] = extraction.SideLine("FRONT", "H12345678", 0.9)
+    for ln in _iraqi_mrz_lines(doc="G41421961"):
+        lines.append(extraction.SideLine("ROI_MRZ", ln, 0.9))
+    fields, warnings, _ = _run(lines)
+    assert fields["unique_card_body_number"]["value"] == "H12345678"
+    assert fields["unique_card_body_number"]["cross_check"] == "MRZ_MISMATCH"
+    assert "SOURCE_MISMATCH" in warnings
+
+
+@pytest.mark.parametrize("bad", [
+    "123456789", "GH1234567", "G1234", "G1234567890", "BODY123456",
+])
+def test_invalid_body_numbers_rejected(bad):
+    lines = _front()
+    lines[10] = extraction.SideLine("FRONT", bad, 0.9)
+    fields, _, _ = _run(_card_lines(lines=lines, mrz=False, family=None))
+    assert "unique_card_body_number" not in fields
+    assert "family_number" not in fields
+
+
+def test_body_number_distinct_from_card_and_family():
+    lines = _front()
+    lines[9] = extraction.SideLine("FRONT", "198060266608", 0.9)
+    lines[10] = extraction.SideLine("FRONT", "G41421961", 0.9)
+    lines.append(extraction.SideLine("ROI_FAMILY", "TESTFAMILY123456", 0.9))
+    fields, _, _ = _run(lines)
+    assert fields["national_card_number"]["value"] == "198060266608"
+    assert fields["unique_card_body_number"]["value"] == "G41421961"
+    assert fields["family_number"]["value"] == "TESTFAMILY123456"
+    assert fields["family_number"]["value"] != "G41421961"
+    assert fields["national_card_number"]["value"] != "G41421961"

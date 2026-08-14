@@ -115,12 +115,45 @@ _VALID_BLOOD_GROUPS = frozenset({"A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-
 # required (the card number). Never applied to names or the H... body number.
 _CARD_CONFUSABLES = {"O": "0", "I": "1", "l": "1", "S": "5", "B": "8"}
 
-# Arabic label anchors (matched on a lightly normalized form).
-_NAME_LABELS = ("الاسم", "اناو")
-_FATHER_LABELS = ("الاب", "اباوك", "ابت")
-_GRANDFATHER_LABELS = ("ابير", "ابابير", "الحد", "الجد")
-_MOTHER_LABELS = ("الام", "ادايك", "داتك")
-_SEX_LABELS = ("الجنس", "اركمز", "اركز")
+# Arabic/Kurdish label anchors for the FRONT name section (matched on a
+# lightly normalized form). Each group also carries "glued" prefixes that OCR
+# can attach directly to the value with no space (e.g. "باوكاسماعيل").
+# Priority order matters: mother switches the parser out of the paternal
+# section, surname is ignored, and only the paternal grandfather counts.
+_FRONT_NAME_GROUPS = [
+    (
+        "mother",
+        ("الام", "ادايك", "ردايك", "داتك", "مادر"),
+        ("ردايك", "ادايك", "داتك", "مادر"),
+    ),
+    (
+        "surname",
+        ("اللقب", "لقب", "انازناو", "نازناو"),
+        ("انازناو", "نازناو"),
+    ),
+    (
+        "grandfather",
+        ("ابابير", "ابير", "الحد", "الجد", "باپير", "اباير"),
+        ("ابابير", "ابير", "الحد", "الجد", "باپير", "اباير"),
+    ),
+    (
+        "father",
+        ("الاب", "اباوك", "باوك", "بابك", "بابه", "ابت", "باو"),
+        ("اباوك", "باوك", "بابك", "بابه", "ابت", "باو"),
+    ),
+    (
+        "name",
+        ("الاسم", "اسم", "اناو", "ناو"),
+        ("الاسم", "اناو"),
+    ),
+]
+_NAME_LABELS = tuple(
+    label for _, labels, _ in _FRONT_NAME_GROUPS for label in labels
+)
+_FATHER_LABELS = ("الاب", "اباوك", "باوك", "بابك", "بابه", "ابت", "باو")
+_GRANDFATHER_LABELS = ("ابابير", "ابير", "الحد", "الجد", "باپير", "اباير")
+_MOTHER_LABELS = ("الام", "ادايك", "ردايك", "داتك", "مادر")
+_SEX_LABELS = ("الجنس", "اركمز", "اركز", "ارهگهز")
 _FAMILY_LABELS = (
     "الرقم العائلي",
     "الرقم العائلى",
@@ -136,7 +169,9 @@ _HARAKAT = "\u0640\u064B\u064C\u064D\u064E\u064F\u0650\u0651\u0652"
 _HIDDEN = "\u200c\u200d\u200f\u200e"
 
 _CARD_NUMBER_RE = re.compile(r"\b[0-9]{10,13}[A-Z0-9]?\b")
-_BODY_NUMBER_RE = re.compile(r"\bH\d{6,12}\b")
+# Iraqi card body number: one valid uppercase Latin letter + 8 digits
+# (observed H######## and G########; NOT restricted to H).
+_BODY_NUMBER_RE = re.compile(r"\b[A-Z]\d{8}\b")
 # No trailing \b: "+"/"-" are non-word chars, so a trailing boundary can never
 # match at end-of-line. \b at the start keeps "1O+" / embedded letters out.
 _BLOOD_RE = re.compile(r"\b([ABO]{1,2})\s*([+-])")
@@ -171,42 +206,139 @@ def _contains_any(line: str, labels) -> bool:
     return any(label in norm for label in labels)
 
 
-def _strip_labels(line: str, labels) -> str:
-    """Remove the leading Arabic label/connector tokens, keep the value."""
-    norm = _norm_ar(line)
-    for label in sorted(labels, key=len, reverse=True):
-        norm = norm.replace(label, "", 1)
-    norm = norm.replace(":", " ").replace("|", " ")
-    tokens = [t for t in norm.split() if t and t not in _CONNECTOR_TOKENS]
-    return " ".join(tokens)
+def _value_after_label(text: str, labels) -> str:
+    """Strip a leading label + glued connector prefix; keep the name value.
+
+    Handles same-line ("الاسم اناو اسماعيل"), glued label+value
+    ("باوكاسماعيل", "ابابيراسماعيل"), and connector-attached
+    ("الاسم ناواسامه") OCR variants. Name labels are only dropped as whole
+    leading tokens so legitimate names like "اسماعيل" are never mangled.
+    """
+    norm = _norm_ar(text)
+    for sep in (":", "|", "/", "؛", ";", "—"):
+        norm = norm.replace(sep, " ")
+    tokens = norm.split()
+    out: list[str] = []
+    started = False
+    for tok in tokens:
+        t = tok
+        if not started:
+            if t in labels or t in _CONNECTOR_TOKENS:
+                continue
+            for pre in (
+                *_glued_prefixes(labels),
+                *sorted(_CONNECTOR_TOKENS, key=len, reverse=True),
+            ):
+                if t.startswith(pre) and len(t) > len(pre):
+                    t = t[len(pre):]
+                    if not t:
+                        t = ""
+                    break
+            started = True
+        if t:
+            out.append(t)
+    return " ".join(out)
+
+
+def _glued_prefixes(labels) -> tuple[str, ...]:
+    """Glued prefixes associated with a field's label set."""
+    for _, group_labels, glued in _FRONT_NAME_GROUPS:
+        if labels == group_labels or set(labels).issubset(set(group_labels)):
+            return glued
+    return ()
+
+
+def _classify_front_line(text: str) -> str | None:
+    """Classify a FRONT line into a name-section field (priority order).
+
+    Matches whole-token labels OR a glued label prefix. Returns one of
+    "mother" / "surname" / "grandfather" / "father" / "name" or None.
+    """
+    norm = _norm_ar(text)
+    for sep in (":", "|", "/", "؛", ";", "—"):
+        norm = norm.replace(sep, " ")
+    tokens = norm.split()
+    for field, labels, glued in _FRONT_NAME_GROUPS:
+        for tok in tokens:
+            if tok in labels:
+                return field
+            for pre in glued:
+                if tok.startswith(pre) and len(tok) > len(pre):
+                    return field
+    return None
 
 
 def _match_front_field(front, labels):
-    """Return (value, confidence) for the first FRONT line carrying a label."""
-    for text, conf in front:
-        if _contains_any(text, labels):
-            value = _strip_labels(text, labels)
-            if value:
-                return value, conf
-    return None, 0.0
+    """Return (value, confidence) for the first line carrying a label.
 
-
-def _match_paternal_grandfather(front):
-    """Paternal grandfather from the FRONT name chain.
-
-    Rule: first grandfather-labeled value that appears before the mother
-    section (mother label). The card lists father then paternal grandfather
-    then لقب / mother / maternal grandfather; only the pre-mother entry is
-    used so the maternal grandfather is never picked.
+    Uses the same label-aware value stripper as the name chain so glued and
+    connector variants are handled consistently (used for sex).
     """
     for text, conf in front:
-        if _contains_any(text, _MOTHER_LABELS):
-            break
-        if _contains_any(text, _GRANDFATHER_LABELS):
-            value = _strip_labels(text, _GRANDFATHER_LABELS)
+        if _contains_any(text, labels):
+            value = _value_after_label(text, labels)
             if value:
                 return value, conf
     return None, 0.0
+
+
+def _parse_front_name_chain(front):
+    """Deterministic front-card name-section parser (state machine).
+
+    Processes ordered FRONT lines: NAME → FATHER → PATERNAL GRANDFATHER →
+    SURNAME(ignored) → MOTHER(exit). Same-line and split-line (label line then
+    value line) variants are handled. Only the paternal grandfather before the
+    mother section populates grandfather_name; the maternal grandfather is
+    never captured.
+
+    Returns (name, name_conf, father, father_conf, grandfather,
+    grandfather_conf).
+    """
+    name = father = grandfather = None
+    name_conf = father_conf = grandfather_conf = 0.0
+    paternal_section = True
+    pending = None  # (field, label_set) awaiting a split-line value
+
+    def capture(field, value, conf):
+        nonlocal name, father, grandfather, name_conf, father_conf, grandfather_conf
+        if field == "name" and name is None:
+            name, name_conf = value, conf
+        elif field == "father" and father is None:
+            father, father_conf = value, conf
+        elif field == "grandfather" and grandfather is None:
+            grandfather, grandfather_conf = value, conf
+
+    for text, conf in front:
+        if _contains_any(text, _MOTHER_LABELS):
+            paternal_section = False
+            pending = None
+            continue
+        if not paternal_section:
+            continue
+        field = _classify_front_line(text)
+        if field is None:
+            if pending is not None and not _contains_any(text, _SEX_LABELS):
+                value = _value_after_label(text, ())
+                if value:
+                    capture(pending[0], value, conf)
+                pending = None
+            continue
+        if field in ("surname", "mother"):
+            continue
+        value = _value_after_label(text, _labels_for(field))
+        if value:
+            capture(field, value, conf)
+            pending = None
+        else:
+            pending = (field, _labels_for(field))
+    return name, name_conf, father, father_conf, grandfather, grandfather_conf
+
+
+def _labels_for(field: str):
+    for f, labels, _ in _FRONT_NAME_GROUPS:
+        if f == field:
+            return labels
+    return ()
 
 
 def _clamp_conf(confidence: float, default: float = 0.7) -> float:
@@ -298,6 +430,10 @@ def _extract_card_number(front):
                 return normed, conf, changed
             # Non-confusable letters remain -> not a reliable numeric slot.
     return None, 0.0, False
+
+
+def _is_body_number(value: str | None) -> bool:
+    return bool(value) and bool(_BODY_NUMBER_RE.fullmatch(value))
 
 
 def _extract_body_number(front) -> str | None:
@@ -443,14 +579,15 @@ def extract_iraqi_national_card(
     elif not mrz_result.checks_passed or "MRZ_PARTIAL" in mrz_result.warnings:
         warnings.append(W_MRZ_PARTIAL)
 
-    # ---- name / father / grandfather (FRONT labels) ----
-    name_value, name_conf = _match_front_field(front, _NAME_LABELS)
+    # ---- name / father / grandfather (FRONT label-aware state machine) ----
+    name_value, name_conf, father_value, father_conf, grandfather_value, grandfather_conf = (
+        _parse_front_name_chain(front)
+    )
     if name_value:
         fields["name"] = _candidate(name_value, _clamp_conf(name_conf), SRC_FRONT)
     else:
         warnings.append(W_FIELD_MISSING)
 
-    father_value, father_conf = _match_front_field(front, _FATHER_LABELS)
     if father_value:
         fields["father_name"] = _candidate(
             father_value, _clamp_conf(father_conf), SRC_FRONT
@@ -458,7 +595,6 @@ def extract_iraqi_national_card(
     else:
         warnings.append(W_FIELD_MISSING)
 
-    grandfather_value, grandfather_conf = _match_paternal_grandfather(front)
     if grandfather_value:
         fields["grandfather_name"] = _candidate(
             grandfather_value, _clamp_conf(grandfather_conf), SRC_FRONT
@@ -510,20 +646,30 @@ def extract_iraqi_national_card(
     else:
         warnings.append(W_FIELD_MISSING)
 
-    # ---- unique card body number (FRONT) with MRZ cross-check ----
+    # ---- unique card body number (FRONT + MRZ cross-check) ----
     body_value = _extract_body_number(front)
-    if body_value:
-        body_conf = 0.9
-        cross = None
-        mrz_doc = mrz_result.document_number
-        if mrz_doc:
-            if mrz_doc == body_value:
+    mrz_doc = mrz_result.document_number
+    mrz_body = mrz_doc if _is_body_number(mrz_doc) else None
+    if body_value or mrz_body:
+        if body_value and mrz_body:
+            if body_value == mrz_body:
                 body_conf = 0.95
                 cross = "MRZ_AGREE"
-            elif mrz_doc.startswith("H"):
+            else:
+                body_conf = 0.7
+                cross = "MRZ_MISMATCH"
                 warnings.append(W_SOURCE_MISMATCH)
+            source = SRC_FRONT
+        elif body_value:
+            body_conf = 0.9
+            cross = None
+            source = SRC_FRONT
+        else:
+            body_conf = 0.85
+            cross = None
+            source = SRC_MRZ
         fields["unique_card_body_number"] = _candidate(
-            body_value, body_conf, SRC_FRONT, cross_check=cross
+            body_value or mrz_body, body_conf, source, cross_check=cross
         )
     else:
         warnings.append(W_FIELD_MISSING)
