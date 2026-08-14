@@ -88,7 +88,10 @@ def confirmed_identity(job_id, token):
         "national_card_number": "999999999999",
         "family_number": "TESTFAMILY123456",
         "unique_card_body_number": "H12345678",
-        "full_name": "SYNTHNAME CONFIRMED",
+        "name": "SYNTHNAME",
+        "father_name": "SYNTHFATHER",
+        "grandfather_name": "SYNTHGRANDFATHER",
+        "confirmation": True,
         "date_of_birth": "1990-05-17",
         "sex": "MALE",
         "nationality": "IQ",
@@ -392,6 +395,7 @@ def _register(
         {
             "email": email,
             "password": password,
+            "governorate": "BAGHDAD",
             "registration_identity": payload,
         },
         format="json",
@@ -423,6 +427,11 @@ def test_scan_first_register_full_lifecycle(api_client):
     assert profile.digital_id.startswith("PT-")
     assert profile.identity_status == PatientProfile.IdentityStatus.PENDING_VERIFICATION
     assert profile.blood_group == "O+"
+    # Structured patronymic components + governorate persisted.
+    assert profile.full_name == "SYNTHNAME SYNTHFATHER SYNTHGRANDFATHER"
+    assert profile.father_name == "SYNTHFATHER"
+    assert profile.grandfather_name == "SYNTHGRANDFATHER"
+    assert profile.governorate == "BAGHDAD"
 
     doc = IdentityDocument.objects.get(patient=profile)
     assert doc.verification_status == IdentityDocument.VerificationStatus.PENDING
@@ -440,8 +449,19 @@ def test_scan_first_register_full_lifecycle(api_client):
     assert IdentityDocumentEvent.objects.filter(document=doc).exists()
     assert AuditLog.objects.filter(action=AuditLog.Action.ACCOUNT_CREATED).exists()
     assert AuditLog.objects.filter(
+        action=AuditLog.Action.PATIENT_PROFILE_CREATED
+    ).exists()
+    assert AuditLog.objects.filter(
         action=AuditLog.Action.IDENTITY_DOCUMENT_UPLOADED
     ).exists()
+
+    # Least-disclosure response: patient/identity summary, NO card identifiers.
+    body = resp.json()["data"]
+    assert body["patient"]["uuid"] == str(profile.uuid)
+    assert body["patient"]["identity_status"] == "PENDING_VERIFICATION"
+    assert body["identity_document"]["verification_status"] == "PENDING"
+    assert "family_number" not in body["patient"]
+    assert "national_card_number" not in body["patient"]
 
     # Job consumed (FINALIZED) atomically with the account. Row/staging
     # cleanup is post-commit (on_commit); invoke it directly here since
@@ -584,6 +604,7 @@ def test_four_identifiers_stay_distinct(api_client):
         {
             "email": "distinct@example.invalid",
             "password": "StrongPass123!",
+            "governorate": "BASRA",
             "registration_identity": payload,
         },
         format="json",
@@ -596,3 +617,127 @@ def test_four_identifiers_stay_distinct(api_client):
     assert doc.national_number == "NAT-BETA-2"
     assert doc.family_number == "FAM-GAMMA-3"
     assert doc.unique_card_body_number == "H-DELTA-4"
+    assert doc.patient.governorate == "BASRA"
+
+
+@pytest.mark.django_db
+def test_governorate_required_for_scan_first(api_client):
+    job_id, token = _successful_job(api_client)
+    resp = api_client.post(
+        REGISTER,
+        {
+            "email": "nogovern@example.invalid",
+            "password": "StrongPass123!",
+            "registration_identity": confirmed_identity(job_id, token),
+        },
+        format="json",
+    )
+    assert resp.status_code == 400
+    assert RegistrationIdentityExtractionJob.objects.get(
+        uuid=job_id
+    ).status != RegistrationIdentityExtractionJob.Status.FINALIZED
+
+
+@pytest.mark.django_db
+def test_confirmation_required_and_must_be_true(api_client):
+    job_id, token = _successful_job(api_client)
+    payload = confirmed_identity(job_id, token)
+    payload["confirmation"] = False
+    resp = api_client.post(
+        REGISTER,
+        {
+            "email": "noconfirm@example.invalid",
+            "password": "StrongPass123!",
+            "governorate": "ERBIL",
+            "registration_identity": payload,
+        },
+        format="json",
+    )
+    assert resp.status_code == 400
+    job = RegistrationIdentityExtractionJob.objects.get(uuid=job_id)
+    assert job.status != RegistrationIdentityExtractionJob.Status.FINALIZED
+
+
+@pytest.mark.django_db
+def test_empty_structured_name_rejected(api_client):
+    job_id, token = _successful_job(api_client)
+    resp = _register(api_client, job_id, token, name="   ")
+    assert resp.status_code == 400
+    assert RegistrationIdentityExtractionJob.objects.get(
+        uuid=job_id
+    ).status != RegistrationIdentityExtractionJob.Status.FINALIZED
+
+
+@pytest.mark.django_db
+def test_duplicate_national_card_number_rejected(api_client):
+    job_id, token = _successful_job(api_client)
+    assert _register(api_client, job_id, token).status_code == 201
+
+    # Same card number on a fresh job -> safe conflict, no account, job kept.
+    job2_id, token2 = _successful_job(api_client)
+    resp = _register(api_client, job2_id, token2, email="dup@example.invalid")
+    assert resp.status_code == 400
+    assert not User.objects.filter(email="dup@example.invalid").exists()
+    assert RegistrationIdentityExtractionJob.objects.get(
+        uuid=job2_id
+    ).status != RegistrationIdentityExtractionJob.Status.FINALIZED
+
+
+@pytest.mark.django_db
+def test_duplicate_card_body_number_rejected(api_client):
+    job_id, token = _successful_job(api_client)
+    assert _register(api_client, job_id, token).status_code == 201
+
+    job2_id, token2 = _successful_job(api_client)
+    payload = confirmed_identity(job2_id, token2)
+    payload["document_number"] = "777777777777"
+    payload["national_card_number"] = "777777777777"
+    # Same physical body number but a different card number -> conflict on body.
+    resp = api_client.post(
+        REGISTER,
+        {
+            "email": "dupbody@example.invalid",
+            "password": "StrongPass123!",
+            "governorate": "NAJAF",
+            "registration_identity": payload,
+        },
+        format="json",
+    )
+    assert resp.status_code == 400
+    assert not User.objects.filter(email="dupbody@example.invalid").exists()
+
+
+@pytest.mark.django_db
+def test_family_number_duplicates_allowed_no_relationship(api_client):
+    from guardians.models import GuardianRelationship
+
+    job_id, token = _successful_job(api_client)
+    resp_a = _register(api_client, job_id, token, email="famA@example.invalid")
+    assert resp_a.status_code == 201
+
+    job2_id, token2 = _successful_job(api_client)
+    payload = confirmed_identity(job2_id, token2)
+    payload["document_number"] = "888888888888"
+    payload["national_card_number"] = "888888888888"
+    payload["unique_card_body_number"] = "H88888888"
+    resp_b = api_client.post(
+        REGISTER,
+        {
+            "email": "famB@example.invalid",
+            "password": "StrongPass123!",
+            "governorate": "BAGHDAD",
+            "registration_identity": payload,
+        },
+        format="json",
+    )
+    # Same family number (TESTFAMILY123456) is allowed for both profiles.
+    assert resp_b.status_code == 201
+    doc_a = IdentityDocument.objects.get(
+        patient__user__email__iexact="famA@example.invalid"
+    )
+    doc_b = IdentityDocument.objects.get(
+        patient__user__email__iexact="famB@example.invalid"
+    )
+    assert doc_a.family_number == doc_b.family_number == "TESTFAMILY123456"
+    # No family/guardian relationship is created in Step 2.
+    assert GuardianRelationship.objects.count() == 0

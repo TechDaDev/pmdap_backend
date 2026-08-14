@@ -118,7 +118,13 @@ class RegistrationIdentitySerializer(
     unique_card_body_number = serializers.CharField(
         max_length=128, required=False, allow_blank=True, default=""
     )
-    full_name = serializers.CharField(max_length=255)
+    # Structured patronymic components (Arabic names are natural input; only
+    # whitespace is normalized). `full_name` is derived server-side.
+    name = serializers.CharField(max_length=255)
+    father_name = serializers.CharField(max_length=255)
+    grandfather_name = serializers.CharField(max_length=255)
+    # Explicit human acknowledgement that the confirmed values match the card.
+    confirmation = serializers.BooleanField()
     date_of_birth = serializers.DateField()
     sex = serializers.ChoiceField(choices=PatientProfile.Sex.choices)
     nationality = serializers.CharField(min_length=2, max_length=2)
@@ -127,6 +133,34 @@ class RegistrationIdentitySerializer(
         required=False,
         default=PatientProfile.BloodGroup.UNKNOWN,
     )
+
+    def _normalize_name(self, value):
+        return " ".join(value.split())
+
+    def validate_name(self, value):
+        value = self._normalize_name(value)
+        if not value:
+            raise serializers.ValidationError("Name is required.")
+        return value
+
+    def validate_father_name(self, value):
+        value = self._normalize_name(value)
+        if not value:
+            raise serializers.ValidationError("Father's name is required.")
+        return value
+
+    def validate_grandfather_name(self, value):
+        value = self._normalize_name(value)
+        if not value:
+            raise serializers.ValidationError("Grandfather's name is required.")
+        return value
+
+    def validate_confirmation(self, value):
+        if value is not True:
+            raise serializers.ValidationError(
+                "You must confirm the information matches your National Card."
+            )
+        return value
 
     def validate_date_of_birth(self, value):
         # Direct ownership requires an adult patient; the HUMAN-CONFIRMED DOB

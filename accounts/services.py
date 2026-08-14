@@ -15,7 +15,13 @@ def normalize_email(email):
 
 @transaction.atomic
 def register_account(
-    *, email, password, patient=None, phone="", registration_identity=None
+    *,
+    email,
+    password,
+    patient=None,
+    phone="",
+    governorate="",
+    registration_identity=None,
 ):
     if registration_identity is not None:
         from registration.services import finalize_scan_first_registration
@@ -24,6 +30,7 @@ def register_account(
             email=email,
             password=password,
             phone=phone,
+            governorate=governorate,
             registration_identity=registration_identity,
         )
     if patient is None:

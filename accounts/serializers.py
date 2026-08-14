@@ -8,6 +8,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from accounts.services import issue_tokens, normalize_email, register_account
 from common.exceptions import AccountUnavailable
+from patients.models import PatientProfile
 from patients.serializers import PatientProfileInputSerializer
 from registration.serializers import RegistrationIdentitySerializer
 
@@ -43,6 +44,11 @@ class RegisterSerializer(RejectUnknownFieldsMixin, serializers.Serializer):
     email = serializers.EmailField()
     phone = serializers.CharField(required=False, allow_blank=True, max_length=32)
     password = serializers.CharField(write_only=True, trim_whitespace=False)
+    # Scan-first registration residence (required only for the scan-first
+    # path; legacy manual registration keeps its existing contract).
+    governorate = serializers.ChoiceField(
+        choices=PatientProfile.Governorate.choices, required=False
+    )
     # LEGACY manual registration (patient demographics supplied directly).
     patient = PatientProfileInputSerializer(write_only=True, required=False)
     # SCAN-FIRST registration (capability-bound identity session + confirmed
@@ -67,6 +73,10 @@ class RegisterSerializer(RejectUnknownFieldsMixin, serializers.Serializer):
             raise serializers.ValidationError(
                 "Provide exactly one of 'patient' (manual) or "
                 "'registration_identity' (scan-first)."
+            )
+        if has_scan_first and not attrs.get("governorate"):
+            raise serializers.ValidationError(
+                {"governorate": ["This field is required for scan-first registration."]}
             )
         try:
             validate_password(attrs["password"], user=User(email=attrs["email"]))

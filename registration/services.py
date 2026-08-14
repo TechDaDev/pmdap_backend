@@ -13,6 +13,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework import serializers
 
@@ -147,9 +148,38 @@ def get_job_for_poll(*, job_id, token):
     return job
 
 
+def _check_identity_conflicts(identity):
+    """Safe duplicate checks for the Iraqi card identifiers.
+
+    The visible card number (national_card_number, carried in
+    document_number/national_number by the backend alias) and the physical
+    body number are per-card unique. family_number is INTENTIONALLY not unique
+    (family members share it) and is never checked — family-linking is Step 3.
+    """
+    card = (
+        identity.get("national_card_number")
+        or identity.get("document_number")
+        or ""
+    ).strip()
+    body = (identity.get("unique_card_body_number") or "").strip()
+    if not card and not body:
+        return
+    from identities.models import IdentityDocument
+
+    q = Q()
+    if card:
+        q |= Q(document_number=card) | Q(national_number=card)
+    if body:
+        q |= Q(unique_card_body_number=body)
+    if IdentityDocument.objects.filter(q).exists():
+        raise serializers.ValidationError(
+            {"registration_identity": ["This National Card is already registered."]}
+        )
+
+
 @transaction.atomic
 def finalize_scan_first_registration(
-    *, email, password, phone, registration_identity
+    *, email, password, phone, governorate, registration_identity
 ):
     """Atomically create User + PatientProfile + pending IdentityDocument.
 
@@ -182,6 +212,9 @@ def finalize_scan_first_registration(
     if job.document_type != registration_identity["document_type"]:
         raise RegistrationIdentityJobConflict()
 
+    # Per-card duplicate protection (family_number excluded by design).
+    _check_identity_conflicts(registration_identity)
+
     try:
         user = user_model.objects.create_user(
             email=email,
@@ -201,15 +234,36 @@ def finalize_scan_first_registration(
             {"email": ["An account with this email already exists."]}
         ) from exc
 
+    # Structured patronymic components are canonical; full_name is the
+    # deterministic join for existing app/UI expectations.
+    name = registration_identity["name"]
+    father_name = registration_identity["father_name"]
+    grandfather_name = registration_identity["grandfather_name"]
+    full_name = " ".join(p for p in (name, father_name, grandfather_name) if p)
+
     profile = create_patient_profile(
         user=user,
-        full_name=registration_identity["full_name"],
+        full_name=full_name,
+        father_name=father_name,
+        grandfather_name=grandfather_name,
+        governorate=governorate,
         date_of_birth=registration_identity["date_of_birth"],
         sex=registration_identity["sex"],
         nationality=registration_identity["nationality"],
         blood_group=registration_identity.get(
             "blood_group", PatientProfile.BloodGroup.UNKNOWN
         ),
+    )
+    record_audit(
+        action=AuditLog.Action.PATIENT_PROFILE_CREATED,
+        actor=user,
+        patient=profile,
+        resource_type="PATIENT_PROFILE",
+        resource_uuid=profile.uuid,
+        new_values={
+            "identity_status": profile.identity_status,
+            "digital_id": profile.digital_id,
+        },
     )
 
     # Promote the staged images (single upload) into permanent files + a

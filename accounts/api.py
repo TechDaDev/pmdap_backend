@@ -5,6 +5,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.authentication import ActiveAccountJWTAuthentication
+from identities.models import IdentityDocument
+from patients.models import PatientProfile
 from accounts.serializers import (
     ErrorEnvelopeSerializer,
     LoginSerializer,
@@ -44,8 +46,34 @@ class RegisterView(APIView):
         serializer = RegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
+        data = PublicUserSerializer(user).data
+        # Scan-first registration: include a least-disclosure patient +
+        # identity summary (never the card/family/body identifiers). Re-query
+        # fresh — the user instance's cached reverse relation predates the
+        # PENDING_VERIFICATION status sync.
+        if request.data.get("registration_identity") is not None:
+            profile = (
+                PatientProfile.objects.filter(user=user).select_related().first()
+            )
+            if profile is not None:
+                data["patient"] = {
+                    "uuid": str(profile.uuid),
+                    "digital_id": profile.digital_id,
+                    "identity_status": profile.identity_status,
+                }
+                doc = (
+                    IdentityDocument.objects.filter(patient=profile)
+                    .order_by("-created_at")
+                    .first()
+                )
+                if doc is not None:
+                    data["identity_document"] = {
+                        "uuid": str(doc.uuid),
+                        "status": doc.status,
+                        "verification_status": doc.verification_status,
+                    }
         return Response(
-            {"data": PublicUserSerializer(user).data}, status=status.HTTP_201_CREATED
+            {"data": data}, status=status.HTTP_201_CREATED
         )
 
 
