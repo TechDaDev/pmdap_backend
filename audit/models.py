@@ -19,6 +19,7 @@ class AuditLog(UUIDModel):
         ACCOUNT_CLAIM_APPROVED = "ACCOUNT_CLAIM_APPROVED", "Account claim approved"
         ACCOUNT_CLAIM_REJECTED = "ACCOUNT_CLAIM_REJECTED", "Account claim rejected"
         PATIENT_ACCOUNT_LINKED = "PATIENT_ACCOUNT_LINKED", "Patient account linked"
+        PATIENT_PROFILE_CREATED = "PATIENT_PROFILE_CREATED", "Patient profile created"
         # Identity
         IDENTITY_DOCUMENT_UPLOADED = (
             "IDENTITY_DOCUMENT_UPLOADED",

@@ -36,6 +36,34 @@ class PatientProfile(UUIDModel):
         VERIFIED = "VERIFIED", "Verified"
         REJECTED = "REJECTED", "Rejected"
 
+    class Governorate(models.TextChoices):
+        """Stable Iraqi governorate codes (registration residence).
+
+        Aligned with the seeded facilities AdministrativeRegion names; kept as
+        explicit stable codes here so the public registration API never
+        depends on a mutable location table.
+        """
+
+        AL_ANBAR = "AL_ANBAR", "Al Anbar"
+        AL_QADISIYYAH = "AL_QADISIYYAH", "Al-Qadisiyyah"
+        BABIL = "BABIL", "Babil"
+        BAGHDAD = "BAGHDAD", "Baghdad"
+        BASRA = "BASRA", "Basra"
+        DHI_QAR = "DHI_QAR", "Dhi Qar"
+        DIYALA = "DIYALA", "Diyala"
+        DUHOK = "DUHOK", "Duhok"
+        ERBIL = "ERBIL", "Erbil"
+        HALABJA = "HALABJA", "Halabja"
+        KARBALA = "KARBALA", "Karbala"
+        KIRKUK = "KIRKUK", "Kirkuk"
+        MAYSAN = "MAYSAN", "Maysan"
+        MUTHANNA = "MUTHANNA", "Muthanna"
+        NAJAF = "NAJAF", "Najaf"
+        NINEVEH = "NINEVEH", "Nineveh"
+        SALADIN = "SALADIN", "Saladin"
+        SULAYMANIYAH = "SULAYMANIYAH", "Sulaymaniyah"
+        WASIT = "WASIT", "Wasit"
+
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -45,6 +73,15 @@ class PatientProfile(UUIDModel):
     )
     digital_id = models.CharField(max_length=17, unique=True, editable=False)
     full_name = models.CharField(max_length=255)
+    # Structured Iraqi patronymic components. Canonical; `full_name` is the
+    # deterministic join "name father grandfather" for existing app/UI
+    # expectations. Blank for legacy profiles created before Step 2.
+    father_name = models.CharField(max_length=255, blank=True, default="")
+    grandfather_name = models.CharField(max_length=255, blank=True, default="")
+    # Current residence / registration governorate (Iraqi card flow).
+    governorate = models.CharField(
+        max_length=32, choices=Governorate.choices, blank=True, default=""
+    )
     date_of_birth = models.DateField(validators=[validate_not_future])
     sex = models.CharField(max_length=16, choices=Sex)
     nationality = models.CharField(
