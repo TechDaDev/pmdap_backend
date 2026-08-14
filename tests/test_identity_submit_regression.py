@@ -193,3 +193,89 @@ def test_second_pending_national_card_returns_409_conflict(api_client):
         "Use the explicit replacement workflow for this document type."
     )
     assert captured["detail_fields"] == []
+
+
+def _submit(api_client, *, document_number="CARD-002", family_number="FAM-002"):
+    front = SimpleUploadedFile("front.jpg", jpeg_bytes(), content_type="image/jpeg")
+    back = SimpleUploadedFile("back.jpg", jpeg_bytes(), content_type="image/jpeg")
+    return api_client.post(
+        COLLECTION,
+        payload(
+            front,
+            back,
+            document_number=document_number,
+            national_number=document_number,
+            family_number=family_number,
+        ),
+        format="multipart",
+    )
+
+
+@pytest.mark.django_db
+def test_second_verified_national_card_returns_409(api_client):
+    """CURRENT + VERIFIED card still blocks a normal duplicate submission."""
+    from accounts.models import User
+
+    user, _ = create_patient()
+    auth(api_client, user)
+    assert _submit(api_client).status_code == 201
+
+    agent = UserFactory(role=User.Role.IDENTITY_VERIFICATION_AGENT)
+    from identities.services import approve_identity_document
+
+    doc = identity_document_model().objects.get(patient__user=user)
+    approve_identity_document(document=doc, agent=agent)
+    doc.refresh_from_db()
+    assert doc.verification_status == identity_document_model().VerificationStatus.VERIFIED
+
+    captured = error_envelope(_submit(api_client, document_number="CARD-003"))
+    assert captured["status"] == 409
+    assert captured["code"] == "identity_document_conflict"
+    assert identity_document_model().objects.filter(patient__user=user).count() == 1
+
+
+@pytest.mark.django_db
+def test_family_number_does_not_bypass_pending_conflict(api_client):
+    """Family number is irrelevant to the lock: a different family number on
+    the duplicate still hits 409 while a CURRENT PENDING card exists."""
+    user, _ = create_patient()
+    auth(api_client, user)
+    assert _submit(api_client, family_number="FAM-001").status_code == 201
+
+    captured = error_envelope(
+        _submit(api_client, document_number="CARD-003", family_number="DIFFERENT-FAM")
+    )
+    assert captured["status"] == 409
+    assert captured["code"] == "identity_document_conflict"
+
+
+@pytest.mark.django_db
+def test_rejected_card_allows_resubmission(api_client):
+    """REJECTED (no current PENDING/VERIFIED replacement) → normal submit is
+    allowed again; the new card becomes CURRENT+PENDING and locks again."""
+    from accounts.models import User
+
+    user, _ = create_patient()
+    auth(api_client, user)
+    assert _submit(api_client).status_code == 201
+
+    agent = UserFactory(role=User.Role.IDENTITY_VERIFICATION_AGENT)
+    from identities.services import reject_identity_document
+
+    doc = identity_document_model().objects.get(patient__user=user)
+    reject_identity_document(document=doc, agent=agent, reason="synthetic test")
+    doc.refresh_from_db()
+    assert doc.verification_status == identity_document_model().VerificationStatus.REJECTED
+
+    # Resubmission allowed while REJECTED.
+    assert _submit(api_client, document_number="CARD-003").status_code == 201
+    docs = identity_document_model().objects.filter(patient__user=user)
+    assert docs.count() == 2
+    new_doc = docs.get(document_number="CARD-003")
+    assert new_doc.status == identity_document_model().LifecycleStatus.CURRENT
+    assert new_doc.verification_status == identity_document_model().VerificationStatus.PENDING
+
+    # Locked again after the fresh PENDING card.
+    captured = error_envelope(_submit(api_client, document_number="CARD-004"))
+    assert captured["status"] == 409
+    assert captured["code"] == "identity_document_conflict"

@@ -788,3 +788,56 @@ def test_arabic_names_alphanumeric_family_and_g_body_accepted(api_client):
     assert doc.document_number == "198060266608"
     assert doc.family_number == "1012L0M10290019303"
     assert doc.unique_card_body_number == "G12345678"
+
+
+@pytest.mark.django_db
+def test_registration_pending_card_blocks_normal_duplicate(api_client):
+    """A National Card created by registration (CURRENT+PENDING) must behave
+    exactly like a normal upload: a second submission through the normal
+    identity endpoint is 409 identity_document_conflict and creates no doc.
+    Regression for the "registration identity + normal endpoint" loophole.
+    """
+    job_id, token = _successful_job(api_client)
+    assert _register(api_client, job_id, token).status_code == 201
+    user = User.objects.get(email="synth.reg@example.invalid")
+    profile = PatientProfile.objects.get(user=user)
+    doc = IdentityDocument.objects.get(patient=profile)
+    assert doc.verification_status == IdentityDocument.VerificationStatus.PENDING
+    assert doc.status == IdentityDocument.LifecycleStatus.CURRENT
+
+    from django.core.files.uploadedfile import SimpleUploadedFile
+
+    def _jpeg(text="SYNTH"):
+        img = Image.new("RGB", (420, 140), "white")
+        from PIL import ImageDraw
+
+        ImageDraw.Draw(img).text((10, 10), text, fill="black")
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG")
+        buf.seek(0)
+        return buf.getvalue()
+
+    api_client.credentials(HTTP_AUTHORIZATION=_auth(user))
+    front = SimpleUploadedFile(
+        "front.jpg", _jpeg("FRONT"), content_type="image/jpeg"
+    )
+    back = SimpleUploadedFile("back.jpg", _jpeg("BACK"), content_type="image/jpeg")
+    resp = api_client.post(
+        "/api/v1/identity-documents/",
+        {
+            "document_type": "UNIFIED_NATIONAL_CARD",
+            "document_number": "555555555555",
+            "national_number": "555555555555",
+            "family_number": "OTHERFAM999",
+            "issuing_country": "IQ",
+            "front_image": front,
+            "back_image": back,
+        },
+        format="multipart",
+    )
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == "identity_document_conflict"
+    # No second document created; original PENDING card untouched.
+    assert IdentityDocument.objects.filter(patient=profile).count() == 1
+    doc.refresh_from_db()
+    assert doc.verification_status == IdentityDocument.VerificationStatus.PENDING
