@@ -741,3 +741,50 @@ def test_family_number_duplicates_allowed_no_relationship(api_client):
     assert doc_a.family_number == doc_b.family_number == "TESTFAMILY123456"
     # No family/guardian relationship is created in Step 2.
     assert GuardianRelationship.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_arabic_names_alphanumeric_family_and_g_body_accepted(api_client):
+    """Finalization accepts real-card-shaped data (SYNTHETIC values).
+
+    Arabic name components, an alphanumeric family number, and a G-prefix
+    body number must all pass validation and persist unchanged. Password is
+    stored hashed, never plaintext.
+    """
+    job_id, token = _successful_job(api_client)
+    payload = confirmed_identity(job_id, token)
+    payload.update(
+        {
+            "name": "اسماعيل",
+            "father_name": "عواد",
+            "grandfather_name": "احمد",
+            "family_number": "1012L0M10290019303",
+            "unique_card_body_number": "G12345678",
+            "national_card_number": "198060266608",
+            "document_number": "198060266608",
+        }
+    )
+    resp = api_client.post(
+        REGISTER,
+        {
+            "email": "arabic.synth@example.invalid",
+            "password": "StrongPass123!",
+            "governorate": "NAJAF",
+            "registration_identity": payload,
+        },
+        format="json",
+    )
+    assert resp.status_code == 201, resp.content
+
+    user = User.objects.get(email="arabic.synth@example.invalid")
+    assert user.check_password("StrongPass123!")
+    assert user.password != "StrongPass123!"
+    profile = user.patient_profile
+    assert profile.full_name == "اسماعيل عواد احمد"
+    assert profile.father_name == "عواد"
+    assert profile.grandfather_name == "احمد"
+    assert profile.governorate == "NAJAF"
+    doc = IdentityDocument.objects.get(patient=profile)
+    assert doc.document_number == "198060266608"
+    assert doc.family_number == "1012L0M10290019303"
+    assert doc.unique_card_body_number == "G12345678"
