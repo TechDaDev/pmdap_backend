@@ -29,6 +29,7 @@ THIRD_PARTY_APPS = [
     "rest_framework",
     "rest_framework_simplejwt.token_blacklist",
     "drf_spectacular",
+    "corsheaders",
 ]
 
 PROJECT_APPS = [
@@ -55,6 +56,7 @@ MIDDLEWARE = [
     "common.middleware.HealthcheckRedirectExemptMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -62,6 +64,23 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "common.middleware.AuditRequestIdMiddleware",
+]
+
+# Flutter Web calls the API from a different origin than the deployed host.
+# Explicit allow-list ONLY — never CORS_ALLOW_ALL_ORIGINS. Local dev web
+# servers are allowed by default; production origins are injected via the
+# CORS_ALLOWED_ORIGINS env var on Railway.
+CORS_ALLOWED_ORIGINS = env_list(
+    "CORS_ALLOWED_ORIGINS",
+    "http://localhost:8080,http://127.0.0.1:8080",
+)
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_HEADERS = [
+    "accept",
+    "authorization",
+    "content-type",
+    "origin",
+    "x-request-id",
 ]
 
 ROOT_URLCONF = "config.urls"
