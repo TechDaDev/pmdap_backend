@@ -95,6 +95,33 @@ def test_configured_image_pixel_limit_is_enforced():
         )
 
 
+def test_modern_phone_photo_dimensions_accepted():
+    """A real modern phone photo (6400x6400 = 40.96MP, crossing the old 40MP
+    ceiling) must pass under the 64MP default. The physical 9.8MB lab JPEG is
+    5360x7728 = 41.4MP; the pixel ceiling must not reject legitimate camera
+    photos."""
+    content = image_bytes("JPEG", size=(6400, 6400))
+    result = inspect_medical_upload(
+        upload("photo.jpg", content, "image/jpeg")
+    )
+    assert result.mime_type == "image/jpeg"
+    assert result.sha256 == hashlib.sha256(content).hexdigest()
+
+
+@override_settings(MEDICAL_IMAGE_MAX_PIXELS=64_000_000)
+def test_pixel_ceiling_still_enforced_at_new_limit():
+    """Raising the ceiling must not disable the check: images above 64MP are
+    still rejected (image-bomb protection preserved)."""
+    with pytest.raises(ValidationError, match="dimensions"):
+        inspect_medical_upload(
+            upload(
+                "huge.jpg",
+                image_bytes("JPEG", size=(8200, 8000)),
+                "image/jpeg",
+            )
+        )
+
+
 def test_filename_is_path_and_header_safe():
     result = inspect_medical_upload(
         upload("../../evil\r\nname.pdf", pdf_bytes(), "application/pdf")

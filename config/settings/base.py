@@ -151,7 +151,10 @@ AVATAR_FILE_ROOT = Path(
     os.getenv("AVATAR_FILE_ROOT", BASE_DIR / "private" / "avatar")
 )
 MEDICAL_FILE_MAX_BYTES = int(os.getenv("MEDICAL_FILE_MAX_BYTES", 25 * 1024 * 1024))
-MEDICAL_IMAGE_MAX_PIXELS = int(os.getenv("MEDICAL_IMAGE_MAX_PIXELS", 40_000_000))
+# 64 megapixels: covers modern phone photos (e.g. 5360x7728 = 41.4MP) while
+# staying well under PIL's decompression-bomb threshold (~89MP), so image-bomb
+# protection is preserved.
+MEDICAL_IMAGE_MAX_PIXELS = int(os.getenv("MEDICAL_IMAGE_MAX_PIXELS", 64_000_000))
 PDF_TEXT_MIN_CHARS = int(os.getenv("PDF_TEXT_MIN_CHARS", "80"))
 PDF_TEXT_MIN_PAGE_CHARS = int(os.getenv("PDF_TEXT_MIN_PAGE_CHARS", "40"))
 PDF_TEXT_MIN_TEXT_PAGE_RATIO = float(os.getenv("PDF_TEXT_MIN_TEXT_PAGE_RATIO", "0.5"))
