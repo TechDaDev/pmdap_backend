@@ -129,7 +129,7 @@ AUTH_PASSWORD_VALIDATORS = [
 AUTH_USER_MODEL = "accounts.User"
 
 LANGUAGE_CODE = "en-us"
-TIME_ZONE = "UTC"
+TIME_ZONE = "Asia/Baghdad"
 USE_I18N = True
 USE_TZ = True
 
@@ -301,6 +301,8 @@ CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/1")
 CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 30 * 60
+CELERY_TIMEZONE = "Asia/Baghdad"
+CELERY_ENABLE_UTC = True
 
 # Privacy-safe app logger config. ONLY identities + registration emit INFO
 # summaries (job UUID, timings, confidence buckets — never OCR text, names,
