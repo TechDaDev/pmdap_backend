@@ -3,6 +3,7 @@ import logging
 from datetime import date
 
 import pytest
+from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.test import override_settings
 
@@ -91,7 +92,7 @@ def test_arabic_ocr_page_preserves_raw_value_and_source():
     assert candidate.raw_value == "١٤/٠٣/٢٠٢٦"
     assert candidate.normalized_value == "14/03/2026"
     assert candidate.source == DateCandidate.Source.OCR
-    assert candidate.pipeline_version == "m9-date-v2"
+    assert candidate.pipeline_version == settings.DATE_PIPELINE_VERSION
 
 
 def test_no_date_is_stable_non_failure_without_candidates():
@@ -218,7 +219,7 @@ def test_database_constraints_bound_score_occurrence_and_suggestion():
             source=DateCandidate.Source.PDF_TEXT,
             occurrence_index=50,
             parsing_rule="DMY_NUMERIC",
-            pipeline_version="m9-date-v2",
+            pipeline_version=settings.DATE_PIPELINE_VERSION,
             is_suggested=True,
         )
     with pytest.raises(IntegrityError), transaction.atomic():

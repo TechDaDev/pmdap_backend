@@ -1,6 +1,7 @@
 from datetime import date
 
 import pytest
+from django.conf import settings
 from django.test import override_settings
 from django.utils import timezone
 
@@ -32,7 +33,7 @@ def candidate(document, *, context="Report Date: 14/03/2026"):
         source=DateCandidate.Source.PDF_TEXT,
         occurrence_index=13,
         parsing_rule="DMY_NUMERIC",
-        pipeline_version="m9-date-v2",
+        pipeline_version=settings.DATE_PIPELINE_VERSION,
         is_suggested=True,
     )
 

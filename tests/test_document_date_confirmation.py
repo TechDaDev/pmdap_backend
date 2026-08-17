@@ -1,6 +1,7 @@
 from datetime import date, timedelta
 
 import pytest
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.test import override_settings
 from django.utils import timezone
@@ -167,7 +168,7 @@ def test_candidate_must_belong_to_document_and_be_current(api_client):
         source=DateCandidate.Source.PDF_TEXT,
         occurrence_index=1,
         parsing_rule="DMY_NUMERIC",
-        pipeline_version="m9-date-v2",
+        pipeline_version=settings.DATE_PIPELINE_VERSION,
     )
     stale = document.date_candidates.filter(is_current=True).first()
     DateCandidate.objects.filter(pk=stale.pk).update(is_current=False)

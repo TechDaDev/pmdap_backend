@@ -20,7 +20,7 @@ class CandidateType(StrEnum):
     UNKNOWN = "UNKNOWN"
 
 
-DATE_PIPELINE_VERSION = "m9-date-v2"
+DATE_PIPELINE_VERSION = "m9-date-v3"
 DEFAULT_CONTEXT_MAX_CHARS = 160
 DEFAULT_SUGGESTION_MIN_SCORE = 0.75
 DEFAULT_SUGGESTION_TIE_TOLERANCE = 0.01
@@ -71,13 +71,13 @@ DATE_PATTERNS = (
     (
         "YMD_NUMERIC",
         re.compile(
-            r"(?<!\d)(?P<year>\d{4})[-/.](?P<month>\d{1,2})[-/.](?P<day>\d{1,2})(?!\d)"
+            r"(?<!\d)(?P<year>\d{4})[\t ]*[-/.][\t ]*(?P<month>\d{1,2})[\t ]*[-/.][\t ]*(?P<day>\d{1,2})(?!\d)"
         ),
     ),
     (
         "DMY_NUMERIC",
         re.compile(
-            r"(?<!\d)(?P<day>\d{1,2})[-/.](?P<month>\d{1,2})[-/.](?P<year>\d{4})(?!\d)"
+            r"(?<!\d)(?P<day>\d{1,2})[\t ]*[-/.][\t ]*(?P<month>\d{1,2})[\t ]*[-/.][\t ]*(?P<year>\d{4})(?!\d)"
         ),
     ),
     (
@@ -278,11 +278,44 @@ def _parse_match(match, rule):
     return parsed, alternative, ambiguous
 
 
+def _parse_compact(digits: str):
+    """Parse an 8-digit run as YYYYMMDD and/or DDMMYYYY with calendar checks.
+
+    OCR of dense Arabic/medical headers frequently drops the date separators
+    (e.g. `٢٠٢١٠١٠٢` for the printed `٢٠٢١/٠١/٠٢`), leaving a contiguous
+    8-digit run. Neither ordering is assumed: both readings are tried and the
+    one that forms a valid calendar date in the medical-document year window
+    (1900..2100) wins. Returns (primary, alternative, ambiguous, rule).
+    """
+    def _in_era(parsed):
+        return parsed is not None and 1900 <= parsed.year <= 2100
+
+    ymd = _safe_date(int(digits[0:4]), int(digits[4:6]), int(digits[6:8]))
+    dmy = _safe_date(int(digits[4:8]), int(digits[2:4]), int(digits[0:2]))
+    ymd = ymd if _in_era(ymd) else None
+    dmy = dmy if _in_era(dmy) else None
+    if ymd is not None and dmy is not None:
+        if ymd == dmy:
+            return ymd, None, False, "COMPACT_YMD"
+        return ymd, dmy, True, "COMPACT_AMBIGUOUS"
+    if ymd is not None:
+        return ymd, None, False, "COMPACT_YMD"
+    if dmy is not None:
+        return dmy, None, False, "COMPACT_DMY"
+    return None, None, False, ""
+
+
 def _label_matches(line: str):
     folded = line.casefold()
     for candidate_type, labels in LABELS.items():
         for label in labels:
-            pattern = re.compile(rf"(?<!\w){re.escape(label.casefold())}(?!\w)")
+            # End boundary rejects a following Latin/Arabic letter (word
+            # continuation like "تاريخي" or "dated") but ALLOWS a directly
+            # glued digit: OCR of Arabic headers frequently merges the label
+            # with its value (`التاريخ٢٠٢١٠١٠٢` for `التاريخ: ٢٠٢١/٠١/٠٢`).
+            pattern = re.compile(
+                rf"(?<!\w){re.escape(label.casefold())}(?![A-Za-z\u0600-\u06FF])"
+            )
             for match in pattern.finditer(folded):
                 yield (
                     candidate_type,
@@ -481,29 +514,22 @@ def detect_page_dates(
             )
         )
 
-    # Compact eight-digit date recovery, strictly gated (M16.1 §24-25).
+    # Compact eight-digit date recovery. Arabic/medical headers often OCR the
+    # printed date with its separators dropped (`٢٠٢١٠١٠٢` for 2021/01/02), so
+    # the run is read as YYYYMMDD or DDMMYYYY and only a real calendar date in
+    # the medical-document year window is kept. Strict gates stay: never for
+    # UNKNOWN / DATE_OF_BIRTH contexts, never next to identifier hints, never
+    # future, never when another pattern already claimed the span.
     for match in COMPACT_DATE_PATTERN.finditer(normalized.text):
         start, end = match.span()
         if any(start < e and end > s for s, e in occupied):
             continue
         digits = match.group(1)
-        if digits[:2] == "00" or digits[2:4] == "00":
-            continue
-        year = int(digits[4:8])
-        if not 1900 <= year <= 2100:
-            continue
-        parsed = _safe_date(year, int(digits[2:4]), int(digits[:2]))
-        if parsed is None:
-            continue
         classification = _classify(normalized.text, start, end)
         if classification.candidate_type in (
             CandidateType.UNKNOWN,
             CandidateType.DATE_OF_BIRTH,
         ):
-            continue
-        if classification.generic:
-            continue
-        if parsed > current_date + timedelta(days=future_tolerance_days):
             continue
         line_start = normalized.text.rfind("\n", 0, start) + 1
         line_end = normalized.text.find("\n", end)
@@ -512,10 +538,15 @@ def detect_page_dates(
         folded = normalized.text[line_start:line_end].casefold()
         if any(hint in folded for hint in IDENTIFIER_HINTS):
             continue
+        parsed, alternative, ambiguous, order = _parse_compact(digits)
+        if parsed is None:
+            continue
+        if parsed > current_date + timedelta(days=future_tolerance_days):
+            continue
         occupied.append((start, end))
         compact_score = _score(
             classification,
-            ambiguous=False,
+            ambiguous=ambiguous,
             detected_date=parsed,
             today=current_date,
             future_tolerance_days=future_tolerance_days,
@@ -523,7 +554,7 @@ def detect_page_dates(
         candidates.append(
             DateCandidateData(
                 detected_date=parsed,
-                alternative_date=None,
+                alternative_date=alternative,
                 raw_value=normalized.raw_slice(start, end),
                 normalized_value=digits,
                 candidate_type=classification.candidate_type,
@@ -534,8 +565,8 @@ def detect_page_dates(
                 ),
                 source=source,
                 occurrence_index=start,
-                ambiguous=False,
-                parsing_rule="COMPACT_DMY",
+                ambiguous=ambiguous,
+                parsing_rule=order,
             )
         )
     return tuple(sorted(candidates, key=lambda c: c.occurrence_index))

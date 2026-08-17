@@ -12,6 +12,7 @@ guarded and self-skips on the SQLite test lane.
 from datetime import date
 
 import pytest
+from django.conf import settings
 from django.db import connection
 
 from processing.models import DateCandidate
@@ -217,7 +218,7 @@ def test_medical_upload_detail_candidates_confirm_runtime_match_schema(
             context="Report Date",
             source="OCR",
             is_suggested=True,
-            pipeline_version="m9-date-v2",
+            pipeline_version=settings.DATE_PIPELINE_VERSION,
         )
 
         detail = api_client.get(f"{DOCUMENTS_COLLECTION}{document_uuid}/")

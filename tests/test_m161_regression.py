@@ -137,3 +137,107 @@ def test_issued_label_now_suggested():
     assert candidate is not None
     assert candidate.detected_date == date(2026, 3, 14)
     assert candidate.candidate_type == CandidateType.ISSUE_DATE
+
+
+# ---------------------------------------------------------------------------
+# Arabic-Indic medical report dates (separators dropped by OCR).
+# A printed `التاريخ: ٢٠٢١/٠١/٠٢` can OCR as `التاريخ٢٠٢١٠١٠٢` (glued, no
+# slashes). The 8-digit run must be read as YYYYMMDD. All synthetic.
+# ---------------------------------------------------------------------------
+
+
+def _detect_one(text):
+    candidates = detect(text)
+    assert len(candidates) == 1, [c.parsing_rule for c in candidates]
+    return candidates[0]
+
+
+def test_arabic_indic_glued_compact_ymd():
+    text = "التاريخ٢٠٢١٠١٠٢"
+    candidate = _detect_one(text)
+    assert candidate.detected_date == date(2021, 1, 2)
+    assert candidate.parsing_rule == "COMPACT_YMD"
+    assert candidate.candidate_type == CandidateType.REPORT_DATE
+
+
+def test_persian_glued_compact_ymd():
+    text = "التاريخ۲۰۲۱۰۱۰۲"
+    candidate = _detect_one(text)
+    assert candidate.detected_date == date(2021, 1, 2)
+    assert candidate.parsing_rule == "COMPACT_YMD"
+    assert candidate.candidate_type == CandidateType.REPORT_DATE
+
+
+def test_ascii_compact_ymd_under_label():
+    text = "Report Date\n20210102"
+    candidate = _detect_one(text)
+    assert candidate.detected_date == date(2021, 1, 2)
+    assert candidate.parsing_rule == "COMPACT_YMD"
+
+
+def test_compact_dmy_still_supported():
+    # A DMY 8-digit run must keep resolving (English reports).
+    text = "Report Date\n02012026"
+    candidate = _detect_one(text)
+    assert candidate.detected_date == date(2026, 1, 2)
+    assert candidate.parsing_rule == "COMPACT_DMY"
+
+
+def test_arabic_indic_with_spaced_separators():
+    text = "التاريخ : ٢٠٢١ / ٠١ / ٠٢ م"
+    candidate = _detect_one(text)
+    assert candidate.detected_date == date(2021, 1, 2)
+    assert candidate.parsing_rule == "YMD_NUMERIC"
+    assert candidate.candidate_type == CandidateType.REPORT_DATE
+
+
+def test_rtl_label_after_date():
+    text = "٢٠٢١/٠١/٠٢ :التاريخ"
+    candidate = _detect_one(text)
+    assert candidate.detected_date == date(2021, 1, 2)
+    assert candidate.candidate_type == CandidateType.REPORT_DATE
+
+
+def test_mixed_digit_scripts_normalize():
+    text = "تاريخ التقرير: ٢٠2١/٠١/02"
+    candidate = _detect_one(text)
+    assert candidate.detected_date == date(2021, 1, 2)
+
+
+def test_glued_label_with_digits_matches_label():
+    # The label is directly glued to the digit value; it must still classify
+    # as REPORT_DATE (not drift to UNKNOWN).
+    candidate = _detect_one("التاريخ٢٠٢١٠١٠٢")
+    assert candidate.candidate_type == CandidateType.REPORT_DATE
+
+
+def test_arabic_phone_number_not_a_date():
+    assert detect("الهاتف: ٠٧٧٠١٢٣٤٥٦٧") == ()
+
+
+def test_arabic_patient_id_not_a_date():
+    assert detect("رقم المريض: ٣٠٣٠٠٠") == ()
+
+
+def test_arabic_age_not_a_date():
+    assert detect("٤٠ سنة") == ()
+
+
+def test_identifier_like_eight_digits_under_number_hint_blocked():
+    # Even a calendar-valid 8-digit run is rejected under an identifier hint.
+    text = "رقم المريض: ١٧٩٣٦٦٣١\nReport Date\n17/09/2025"
+    candidate = suggested(text)
+    assert candidate is not None
+    assert candidate.detected_date == date(2025, 9, 17)
+    assert all(
+        c.parsing_rule not in {"COMPACT_YMD", "COMPACT_DMY"}
+        or c.detected_date == date(2025, 9, 17)
+        for c in detect(text)
+    )
+
+
+def test_arabic_word_continuation_not_mislabeled():
+    # "تاريخي" must not match the label "تاريخ"; the date stays UNKNOWN.
+    candidates = detect("تاريخي ٢٠٢١/٠١/٠٢")
+    assert len(candidates) == 1
+    assert candidates[0].candidate_type != CandidateType.REPORT_DATE

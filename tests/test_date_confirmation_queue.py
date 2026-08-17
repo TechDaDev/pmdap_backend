@@ -9,6 +9,8 @@ from datetime import date
 
 import pytest
 
+from django.conf import settings
+
 from documents.models import MedicalDocument
 from processing.models import DateCandidate
 from tests.archive_helpers import make_document, verified_document
@@ -47,7 +49,7 @@ def make_candidate(document, detected_date, *, score=0.9, suggested=True):
         source=DateCandidate.Source.OCR,
         occurrence_index=1,
         parsing_rule="DMY_NUMERIC",
-        pipeline_version="m9-date-v2",
+        pipeline_version=settings.DATE_PIPELINE_VERSION,
         is_suggested=suggested,
         is_current=True,
     )
