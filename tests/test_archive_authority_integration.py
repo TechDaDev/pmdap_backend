@@ -21,7 +21,8 @@ def test_suggested_but_unconfirmed_date_stays_out_of_chronology_until_confirmed(
     assert outcome == "AWAITING_CONFIRMATION"
 
     service = ArchiveQueryService(patient)
-    assert service.chronological_queryset({}).count() == 0
+    # Archive includes the awaiting doc; only the confirmation bucket is 1.
+    assert service.chronological_queryset({}).count() == 1
     assert service.unconfirmed_count() == 1
 
     candidate = document.date_candidates.get(is_current=True, is_suggested=True)
@@ -149,9 +150,12 @@ def test_unconfirmed_variants_remain_in_bucket_without_manual_date(status):
     user, patient = patient_user()
     make_document(patient, user, processing_status=status)
     service = ArchiveQueryService(patient)
-    assert service.chronological_queryset({}).count() == 0
-    assert service.unconfirmed_count() == 1
-    assert service.summary()["unconfirmed_date_count"] == 1
+    # Default archive shows every active document regardless of date state.
+    assert service.chronological_queryset({}).count() == 1
+    # Only AWAITING_CONFIRMATION lands in the confirmation queue.
+    expected = 1 if status == "AWAITING_CONFIRMATION" else 0
+    assert service.unconfirmed_count() == expected
+    assert service.summary()["unconfirmed_date_count"] == expected
     assert service.summary()["years"] == []
 
 
