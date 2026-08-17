@@ -8,6 +8,7 @@ from documents.api import (
     MinorMedicalDocumentDateConfirmationView,
     MinorMedicalDocumentDetailView,
     MinorMedicalDocumentFileView,
+    MinorMedicalDocumentPendingConfirmationView,
 )
 from guardians.api import MinorCollectionView, MinorDetailView
 
@@ -53,5 +54,10 @@ urlpatterns = [
         "<uuid:minor_uuid>/documents/<uuid:document_uuid>/confirm-date/",
         MinorMedicalDocumentDateConfirmationView.as_view(),
         name="minor-medical-document-confirm-date",
+    ),
+    path(
+        "<uuid:minor_uuid>/documents/date-confirmations/pending/",
+        MinorMedicalDocumentPendingConfirmationView.as_view(),
+        name="minor-medical-document-date-confirmations-pending",
     ),
 ]

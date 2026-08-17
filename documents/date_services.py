@@ -28,6 +28,37 @@ ALLOWED_DATE_DECISION_STATES = {
 }
 
 
+def document_needs_date_confirmation(document):
+    """Authoritative domain rule: does this document sit in the confirm queue?
+
+    TRUE when the document is active, reached AWAITING_CONFIRMATION, and the
+    report date is not yet user-confirmed.
+
+    Deliberately does NOT depend on DateCandidate rows — OCR may legitimately
+    find no date, and such documents still require (manual) confirmation.
+    """
+    return (
+        document.archive_status == MedicalDocument.ArchiveStatus.ACTIVE
+        and document.processing_status
+        == MedicalDocument.ProcessingStatus.AWAITING_CONFIRMATION
+        and not document.date_verified
+    )
+
+
+def pending_confirmation_queryset(patient):
+    """Documents currently awaiting date confirmation for `patient`.
+
+    Single source of truth for BOTH the confirm-dates queue and its count, so
+    the Home badge and the queue page can never drift.
+    """
+    return MedicalDocument.objects.filter(
+        patient=patient,
+        archive_status=MedicalDocument.ArchiveStatus.ACTIVE,
+        processing_status=MedicalDocument.ProcessingStatus.AWAITING_CONFIRMATION,
+        date_verified=False,
+    )
+
+
 def confirm_document_date(*, document, actor, candidate_id=None, manual_date=None):
     if (candidate_id is None) == (manual_date is None):
         raise InvalidDateConfirmation()

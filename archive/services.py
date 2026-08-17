@@ -2,14 +2,25 @@ import logging
 from collections import defaultdict
 from datetime import date
 
-from django.db.models import Count, Q
+from django.db.models import Case, Count, F, DateTimeField, When
 from django.db.models.functions import ExtractMonth, ExtractYear
 
+from documents.date_services import pending_confirmation_queryset
 from documents.models import MedicalDocument
 
 logger = logging.getLogger(__name__)
 
-VERIFIED_ORDERING = ("-document_date", "-created_at", "-uuid")
+# Undated documents sort by creation time; dated ones by their confirmed date.
+EFFECTIVE_SORT_DATE = Case(
+    When(
+        date_verified=True,
+        document_date__isnull=False,
+        then=F("document_date"),
+    ),
+    default=F("created_at"),
+    output_field=DateTimeField(),
+)
+VERIFIED_ORDERING = ("-sort_date", "-created_at", "-uuid")
 UNCONFIRMED_ORDERING = ("-created_at", "-uuid")
 
 
@@ -38,30 +49,11 @@ class ArchiveQueryService:
         )
 
     def chronological_queryset(self, filters):
-        queryset = self.archive_queryset().filter(
-            date_verified=True,
-            document_date__isnull=False,
-        )
-        return self._apply_verified_filters(queryset, filters)
-
-    def unconfirmed_queryset(self, filters):
-        queryset = self.archive_queryset().filter(
-            Q(date_verified=False) | Q(document_date__isnull=True)
-        )
-        if document_type := filters.get("document_type"):
-            queryset = queryset.filter(document_type=document_type)
-        if facility := filters.get("healthcare_facility"):
-            queryset = queryset.filter(healthcare_facility=facility)
-        return queryset
-
-    def unconfirmed_count(self):
-        return (
-            self._active_queryset()
-            .filter(Q(date_verified=False) | Q(document_date__isnull=True))
-            .count()
-        )
-
-    def _apply_verified_filters(self, queryset, filters):
+        # Archive = every active document, INCLUDING undated / date-unconfirmed
+        # ones (their report date may still need confirmation). A year/month
+        # filter naturally keeps only documents with a matching confirmed
+        # report date; "All dates" shows everything.
+        queryset = self.archive_queryset().annotate(sort_date=EFFECTIVE_SORT_DATE)
         if document_type := filters.get("document_type"):
             queryset = queryset.filter(document_type=document_type)
         if facility := filters.get("healthcare_facility"):
@@ -78,7 +70,24 @@ class ArchiveQueryService:
                 document_date__gte=start,
                 document_date__lt=end,
             )
-        return queryset
+        return queryset.order_by(*VERIFIED_ORDERING)
+
+    def unconfirmed_queryset(self, filters):
+        # Same authoritative domain rule as the confirm-dates queue (active +
+        # AWAITING_CONFIRMATION + not user-confirmed).
+        queryset = pending_confirmation_queryset(self.patient).select_related(
+            "healthcare_facility__country",
+            "healthcare_facility__region",
+            "healthcare_facility__city",
+        )
+        if document_type := filters.get("document_type"):
+            queryset = queryset.filter(document_type=document_type)
+        if facility := filters.get("healthcare_facility"):
+            queryset = queryset.filter(healthcare_facility=facility)
+        return queryset.order_by(*UNCONFIRMED_ORDERING)
+
+    def unconfirmed_count(self):
+        return pending_confirmation_queryset(self.patient).count()
 
     def summary(self):
         active = self._active_queryset()

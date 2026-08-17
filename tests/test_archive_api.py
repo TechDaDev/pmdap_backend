@@ -94,10 +94,14 @@ def test_another_patients_documents_are_excluded(api_client):
     assert response.data["data"]["results"][0]["title"] == "own"
 
 
-def test_unconfirmed_excluded_from_default_but_listable(api_client):
+def test_unconfirmed_documents_visible_in_default_archive_and_listable(
+    api_client,
+):
     user, patient = patient_user()
     verified = verified_document(patient, user, date(2026, 3, 14), title="verified")
-    awaiting = make_document(patient, user, title="awaiting")
+    awaiting = make_document(
+        patient, user, processing_status="AWAITING_CONFIRMATION", title="awaiting"
+    )
     date_not_found = make_document(
         patient,
         user,
@@ -107,22 +111,37 @@ def test_unconfirmed_excluded_from_default_but_listable(api_client):
     failed = make_document(patient, user, processing_status="FAILED", title="failed")
     authenticate(api_client, user)
 
+    # Archive = every active document, INCLUDING date-unconfirmed ones. Only
+    # AWAITING_CONFIRMATION counts toward the confirmation queue.
     default = api_client.get(ARCHIVE)
-    assert default.data["data"]["count"] == 1
-    assert default.data["data"]["results"][0]["uuid"] == str(verified.uuid)
-    assert default.data["data"]["unconfirmed_date_count"] == 3
+    assert default.data["data"]["count"] == 4
+    uuids = {r["uuid"] for r in default.data["data"]["results"]}
+    assert uuids == {
+        str(verified.uuid),
+        str(awaiting.uuid),
+        str(date_not_found.uuid),
+        str(failed.uuid),
+    }
+    assert default.data["data"]["unconfirmed_date_count"] == 1
 
     unconfirmed = api_client.get(f"{ARCHIVE}?date_status=UNCONFIRMED")
-    assert unconfirmed.data["data"]["count"] == 3
-    uuids = {r["uuid"] for r in unconfirmed.data["data"]["results"]}
-    assert uuids == {str(awaiting.uuid), str(date_not_found.uuid), str(failed.uuid)}
+    assert unconfirmed.data["data"]["count"] == 1
+    assert [r["uuid"] for r in unconfirmed.data["data"]["results"]] == [
+        str(awaiting.uuid)
+    ]
 
 
 def test_unconfirmed_ordering_by_created_at_then_uuid(api_client):
     user, patient = patient_user()
     fixed = date(2026, 1, 1)
     docs = [
-        make_document(patient, user, title=f"u-{index}", created_at=fixed)
+        make_document(
+            patient,
+            user,
+            processing_status="AWAITING_CONFIRMATION",
+            title=f"u-{index}",
+            created_at=fixed,
+        )
         for index in range(4)
     ]
     authenticate(api_client, user)
@@ -137,14 +156,21 @@ def test_unconfirmed_list_supports_type_and_facility_filters(api_client):
     target = make_document(
         patient,
         user,
+        processing_status="AWAITING_CONFIRMATION",
         document_type="RADIOLOGY",
         healthcare_facility=facility,
         title="unconfirmed-target",
     )
-    make_document(patient, user, document_type="LABORATORY")
     make_document(
         patient,
         user,
+        processing_status="AWAITING_CONFIRMATION",
+        document_type="LABORATORY",
+    )
+    make_document(
+        patient,
+        user,
+        processing_status="AWAITING_CONFIRMATION",
         document_type="RADIOLOGY",
         healthcare_facility=None,
     )

@@ -6,10 +6,16 @@ from documents.api import (
     MedicalDocumentDateConfirmationView,
     MedicalDocumentDetailView,
     MedicalDocumentFileView,
+    MedicalDocumentPendingConfirmationView,
 )
 
 urlpatterns = [
     path("", MedicalDocumentCollectionView.as_view(), name="medical-document-list"),
+    path(
+        "date-confirmations/pending/",
+        MedicalDocumentPendingConfirmationView.as_view(),
+        name="medical-document-date-confirmations-pending",
+    ),
     path(
         "<uuid:document_uuid>/",
         MedicalDocumentDetailView.as_view(),

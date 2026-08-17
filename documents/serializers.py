@@ -127,6 +127,34 @@ class MedicalDocumentDetailSerializer(MedicalDocumentSerializer):
         return hasattr(document, "document_text")
 
 
+class PendingDateConfirmationCandidateSerializer(serializers.ModelSerializer):
+    """Safe subset of a date candidate for the confirm queue (no OCR context)."""
+
+    date = serializers.DateField(source="detected_date", read_only=True)
+    confidence = serializers.FloatField(source="score", read_only=True)
+    type = serializers.CharField(source="candidate_type", read_only=True)
+
+    class Meta:
+        model = DateCandidate
+        fields = ("uuid", "date", "confidence", "type", "ambiguous", "is_suggested")
+        read_only_fields = fields
+
+
+class PendingDateConfirmationSerializer(serializers.Serializer):
+    """Document-centric confirm-dates queue item.
+
+    The document is the unit — it is returned even when OCR found no date
+    (`detected_candidates` empty, `requires_manual_date` true).
+    """
+
+    document_uuid = serializers.UUIDField()
+    document_type = serializers.CharField()
+    processing_status = serializers.CharField()
+    created_at = serializers.DateTimeField()
+    detected_candidates = PendingDateConfirmationCandidateSerializer(many=True)
+    requires_manual_date = serializers.BooleanField()
+
+
 class DateCandidateSerializer(serializers.ModelSerializer):
     date = serializers.DateField(source="detected_date", read_only=True)
     type = serializers.CharField(source="candidate_type", read_only=True)

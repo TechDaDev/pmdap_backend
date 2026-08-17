@@ -7,7 +7,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.serializers import ErrorEnvelopeSerializer
-from documents.date_services import confirm_document_date
+from documents.date_services import confirm_document_date, pending_confirmation_queryset
 from documents.exceptions import (
     MedicalDocumentNotFound,
     MedicalFileStorageFailed,
@@ -24,6 +24,7 @@ from documents.serializers import (
     DateCandidateSerializer,
     DocumentDateConfirmationResponseSerializer,
     DocumentDateConfirmationSerializer,
+    PendingDateConfirmationSerializer,
     MedicalDocumentDetailSerializer,
     MedicalDocumentMetadataSerializer,
     MedicalDocumentSerializer,
@@ -364,6 +365,74 @@ class MedicalDocumentDateConfirmationView(APIView):
         )
 
 
+class MedicalDocumentPendingConfirmationView(APIView):
+    """Document-centric date-confirmation queue.
+
+    Each active AWAITING_CONFIRMATION document is returned even when OCR found
+    no date (empty `detected_candidates` + `requires_manual_date` true). The
+    queue and its count derive from the SAME domain rule so Home badge and the
+    queue page can never drift.
+    """
+
+    def get_patient(self, request, **kwargs):
+        del kwargs
+        return owned_profile(request.user)
+
+    @extend_schema(
+        operation_id="medical_document_date_confirmations_pending",
+        responses={
+            200: envelope(
+                "MedicalDocumentPendingConfirmations",
+                inline_serializer(
+                    name="MedicalDocumentPendingConfirmationsData",
+                    fields={
+                        "count": serializers.IntegerField(),
+                        "results": PendingDateConfirmationSerializer(many=True),
+                    },
+                ),
+            ),
+            401: ErrorEnvelopeSerializer,
+            403: ErrorEnvelopeSerializer,
+        },
+        tags=["Medical documents"],
+    )
+    def get(self, request, **kwargs):
+        patient = self.get_patient(request, **kwargs)
+        queryset = pending_confirmation_queryset(patient).order_by(
+            "-created_at", "-uuid"
+        )
+        results = []
+        for document in queryset:
+            rows = document.date_candidates.filter(is_current=True).order_by(
+                "-score", "uuid"
+            )
+            # Canonical candidate shape (serializer field names) — never raw
+            # OCR context. Empty list for a zero-candidate document, which is
+            # still returned (manual date fallback).
+            candidates = [
+                {
+                    "uuid": row.uuid,
+                    "date": row.detected_date,
+                    "confidence": row.score,
+                    "type": row.candidate_type,
+                    "ambiguous": row.ambiguous,
+                    "is_suggested": row.is_suggested,
+                }
+                for row in rows
+            ]
+            results.append(
+                {
+                    "document_uuid": document.uuid,
+                    "document_type": document.document_type,
+                    "processing_status": document.processing_status,
+                    "created_at": document.created_at,
+                    "detected_candidates": candidates,
+                    "requires_manual_date": not candidates,
+                }
+            )
+        return Response({"data": {"count": len(results), "results": results}})
+
+
 def authorized_minor_patient(request, minor_uuid):
     from guardians.api import authorized_minor_relationship
     from guardians.exceptions import GuardianNotVerified, GuardianRelationshipNotFound
@@ -413,5 +482,17 @@ class MinorMedicalDocumentDateCandidateView(MedicalDocumentDateCandidateView):
     post=extend_schema(operation_id="minor_medical_document_date_confirm"),
 )
 class MinorMedicalDocumentDateConfirmationView(MedicalDocumentDateConfirmationView):
+    def get_patient(self, request, **kwargs):
+        return authorized_minor_patient(request, kwargs["minor_uuid"])
+
+
+@extend_schema_view(
+    get=extend_schema(
+        operation_id="minor_medical_document_date_confirmations_pending"
+    ),
+)
+class MinorMedicalDocumentPendingConfirmationView(
+    MedicalDocumentPendingConfirmationView
+):
     def get_patient(self, request, **kwargs):
         return authorized_minor_patient(request, kwargs["minor_uuid"])

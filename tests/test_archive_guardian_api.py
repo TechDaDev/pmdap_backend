@@ -113,20 +113,24 @@ def test_child_remains_document_patient_and_no_guardian_data(api_client):
     patient = minor(digital_id="30000000000000025")
     relationship(father, patient, kind="FATHER")
     document = verified_document(patient, father, date(2026, 2, 1))
-    make_document(patient, father)
+    make_document(
+        patient,
+        father,
+        processing_status="AWAITING_CONFIRMATION",
+    )
     api_client.force_authenticate(user=father)
 
     response = api_client.get(guardian_archive(patient))
     assert response.status_code == 200
     assert document.patient == patient
-    row = response.data["data"]["results"][0]
+    uuids = {row["uuid"] for row in response.data["data"]["results"]}
     encoded = str(response.data)
     assert "uploaded_by" not in encoded
     assert "digital_id" not in encoded
     assert "full_name" not in encoded
     assert "date_of_birth" not in encoded
     assert "identity_status" not in encoded
-    assert row["uuid"] == str(document.uuid)
+    assert str(document.uuid) in uuids
 
 
 def test_two_guardians_do_not_learn_about_each_other(api_client):
@@ -161,13 +165,18 @@ def test_guardian_unconfirmed_bucket_and_filters(api_client):
     patient = minor(digital_id="30000000000000027")
     relationship(father, patient, kind="FATHER")
     verified_document(patient, father, date(2026, 3, 14))
-    make_document(patient, father)
+    make_document(
+        patient,
+        father,
+        processing_status="AWAITING_CONFIRMATION",
+    )
     api_client.force_authenticate(user=father)
 
     default = api_client.get(guardian_archive(patient))
     unconfirmed = api_client.get(f"{guardian_archive(patient)}?date_status=UNCONFIRMED")
     year = api_client.get(f"{guardian_archive(patient)}?year=2026")
-    assert default.data["data"]["count"] == 1
+    # Default archive includes the awaiting (undated) doc too.
+    assert default.data["data"]["count"] == 2
     assert default.data["data"]["unconfirmed_date_count"] == 1
     assert unconfirmed.data["data"]["count"] == 1
     assert year.data["data"]["count"] == 1

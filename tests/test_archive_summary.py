@@ -23,8 +23,8 @@ def test_summary_year_month_type_facility_and_unconfirmed_counts(api_client):
     verified_document(patient, user, date(2026, 3, 20), healthcare_facility=facility_a)
     verified_document(patient, user, date(2026, 4, 2), healthcare_facility=facility_b)
     verified_document(patient, user, date(2025, 12, 5))
-    make_document(patient, user)
-    make_document(patient, user, processing_status="DATE_NOT_FOUND")
+    make_document(patient, user, processing_status="AWAITING_CONFIRMATION")
+    make_document(patient, user, processing_status="AWAITING_CONFIRMATION")
     authenticate(api_client, user)
 
     response = api_client.get(SUMMARY)
@@ -55,7 +55,9 @@ def test_summary_excludes_soft_deleted_from_all_groupings(api_client):
     deleted = verified_document(
         patient, user, date(2026, 3, 15), healthcare_facility=facility
     )
-    unconfirmed = make_document(patient, user)
+    unconfirmed = make_document(
+        patient, user, processing_status="AWAITING_CONFIRMATION"
+    )
     deleted.archive_status = MedicalDocument.ArchiveStatus.DELETED
     deleted.save(update_fields=("archive_status", "updated_at"))
     authenticate(api_client, user)
