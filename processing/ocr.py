@@ -50,6 +50,12 @@ class OCRResourceError(OCRError):
 class OCRLine:
     text: str
     confidence: float
+    # Axis-aligned bounding box in source pixels (optional; absent for
+    # synthetic/test engines or engines that do not expose geometry).
+    x_min: int | None = None
+    y_min: int | None = None
+    x_max: int | None = None
+    y_max: int | None = None
 
 
 @dataclass(frozen=True)
@@ -207,6 +213,29 @@ class PaddleOCREngine(OCREngine):
             raise OCREngineResultError("OCR engine returned malformed output.")
         return payload
 
+    @staticmethod
+    def _read_boxes(payload, expected_count):
+        """Read ``rec_boxes`` ([x_min, y_min, x_max, y_max] per line).
+
+        Geometry is optional: malformed or missing boxes degrade to ``None``
+        (canonical text still persists), never fail the whole OCR.
+        """
+        boxes = payload.get("rec_boxes")
+        if not isinstance(boxes, (list, tuple)) or len(boxes) != expected_count:
+            return None
+        parsed = []
+        for box in boxes:
+            if (
+                not isinstance(box, (list, tuple))
+                or len(box) != 4
+                or not all(type(value) is int and value >= 0 for value in box)
+                or box[0] > box[2]
+                or box[1] > box[3]
+            ):
+                return None
+            parsed.append((box[0], box[1], box[2], box[3]))
+        return tuple(parsed)
+
     def extract_image(self, image):
         if not isinstance(image, Image.Image):
             raise OCRImageDecodeError("OCR input must be a decoded image.")
@@ -238,8 +267,11 @@ class PaddleOCREngine(OCREngine):
         if len(texts) != len(scores):
             raise OCREngineResultError("OCR engine returned malformed output.")
 
+        boxes = self._read_boxes(payload, len(texts))
+
         lines = []
-        for text, score in zip(texts, scores, strict=True):
+        for index, text in enumerate(texts):
+            score = scores[index]
             if not isinstance(text, str) or isinstance(score, bool):
                 raise OCREngineResultError("OCR engine returned malformed output.")
             try:
@@ -251,7 +283,20 @@ class PaddleOCREngine(OCREngine):
             if not math.isfinite(confidence) or not 0 <= confidence <= 1:
                 raise OCREngineResultError("OCR engine returned malformed output.")
             if text:
-                lines.append(OCRLine(text=text, confidence=confidence))
+                box = boxes[index] if boxes is not None else None
+                if box is None:
+                    lines.append(OCRLine(text=text, confidence=confidence))
+                else:
+                    lines.append(
+                        OCRLine(
+                            text=text,
+                            confidence=confidence,
+                            x_min=box[0],
+                            y_min=box[1],
+                            x_max=box[2],
+                            y_max=box[3],
+                        )
+                    )
 
         text = "\n".join(line.text for line in lines)
         if len(text) > settings.OCR_MAX_TEXT_CHARS_PER_PAGE:

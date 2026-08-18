@@ -81,6 +81,64 @@ class DocumentTextPage(UUIDModel):
         return f"{self.document_text_id}:{self.page_number}"
 
 
+class DocumentTextSpan(UUIDModel):
+    """One OCR line with normalized geometry.
+
+    Canonical readable text lives in ``DocumentText`` / ``DocumentTextPage``.
+    Spans are supplemental spatial evidence (used by structured lab
+    extraction). Coordinates are normalized to the page (0.0-1.0) so parsing is
+    independent of source resolution; ``page_width`` / ``page_height`` retain
+    the source pixels the OCR engine actually saw.
+    """
+
+    class Source(models.TextChoices):
+        OCR = "OCR", "OCR"
+        PDF_TEXT = "PDF_TEXT", "PDF text"
+
+    document_text_page = models.ForeignKey(
+        DocumentTextPage,
+        on_delete=models.CASCADE,
+        related_name="spans",
+    )
+    sequence = models.PositiveIntegerField()
+    text = models.TextField(blank=True)
+    confidence = models.FloatField()
+    x_min = models.FloatField()
+    y_min = models.FloatField()
+    x_max = models.FloatField()
+    y_max = models.FloatField()
+    source = models.CharField(max_length=16, choices=Source, default=Source.OCR)
+    page_width = models.PositiveIntegerField()
+    page_height = models.PositiveIntegerField()
+
+    class Meta:
+        ordering = ("sequence",)
+        constraints = [
+            models.UniqueConstraint(
+                fields=("document_text_page", "sequence"),
+                name="processing_unique_document_text_span_sequence",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(x_min__gte=0.0)
+                    & models.Q(y_min__gte=0.0)
+                    & models.Q(x_max__lte=1.0)
+                    & models.Q(y_max__lte=1.0)
+                    & models.Q(x_min__lte=models.F("x_max"))
+                    & models.Q(y_min__lte=models.F("y_max"))
+                ),
+                name="processing_span_normalized_bounds",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(sequence__gte=0),
+                name="processing_span_sequence_nonnegative",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.document_text_page_id}:{self.sequence}"
+
+
 class DateCandidate(UUIDModel):
     class CandidateType(models.TextChoices):
         REPORT_DATE = "REPORT_DATE", "Report date"

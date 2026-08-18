@@ -13,7 +13,7 @@ from audit.models import AuditLog
 from audit.services import record_audit
 from documents.models import MedicalDocument, MedicalDocumentEvent, StoredFile
 from processing.extraction import PAGE_SEPARATOR, TextUsabilityEvaluator
-from processing.models import DocumentText, DocumentTextPage
+from processing.models import DocumentText, DocumentTextPage, DocumentTextSpan
 from processing.ocr import (
     ImagePreprocessor,
     OCREngineResultError,
@@ -265,6 +265,7 @@ def _valid_result(result):
                 isinstance(line.text, str)
                 and type(line.confidence) is float
                 and 0 <= line.confidence <= 1
+                and _valid_line_geometry(line)
                 for line in result.lines
             )
             and result.text == "\n".join(line.text for line in result.lines)
@@ -279,7 +280,46 @@ def _meaningful(text):
     return TextUsabilityEvaluator.meaningful_character_count(text)
 
 
-def _persist_image_result(document, result):
+def _valid_line_geometry(line):
+    coords = (line.x_min, line.y_min, line.x_max, line.y_max)
+    if all(value is None for value in coords):
+        return True
+    if any(value is None for value in coords):
+        return False
+    return (
+        all(type(value) is int and value >= 0 for value in coords)
+        and line.x_min <= line.x_max
+        and line.y_min <= line.y_max
+    )
+
+
+def _span_rows(page, width, height, lines):
+    """Build normalized DocumentTextSpan rows from OCR lines with geometry."""
+    if not width or not height:
+        return []
+    spans = []
+    for index, line in enumerate(lines):
+        if None in (line.x_min, line.y_min, line.x_max, line.y_max):
+            continue
+        spans.append(
+            DocumentTextSpan(
+                document_text_page=page,
+                sequence=index,
+                text=line.text,
+                confidence=line.confidence,
+                x_min=line.x_min / width,
+                y_min=line.y_min / height,
+                x_max=line.x_max / width,
+                y_max=line.y_max / height,
+                source=DocumentTextSpan.Source.OCR,
+                page_width=width,
+                page_height=height,
+            )
+        )
+    return spans
+
+
+def _persist_image_result(document, result, width, height):
     if _meaningful(result.text) < settings.OCR_TEXT_MIN_MEANINGFUL_CHARS:
         raise OCRError("OCR output did not contain usable text.")
     extracted = DocumentText.objects.create(
@@ -299,7 +339,7 @@ def _persist_image_result(document, result):
         ocr_engine_version=result.engine_version,
         ocr_pipeline_version=result.pipeline_version,
     )
-    DocumentTextPage.objects.create(
+    page = DocumentTextPage.objects.create(
         document_text=extracted,
         page_number=1,
         text=result.text,
@@ -316,10 +356,14 @@ def _persist_image_result(document, result):
         ocr_duration_ms=result.duration_ms,
         preprocessing_version=result.preprocessing_version,
     )
+    DocumentTextSpan.objects.bulk_create(
+        _span_rows(page, width, height, result.lines),
+        ignore_conflicts=True,
+    )
     return extracted
 
 
-def _persist_pdf_results(document, source_text_uuid, results):
+def _persist_pdf_results(document, source_text_uuid, results, page_dims):
     if str(document.document_text.uuid) != source_text_uuid:
         return None
     pages = {
@@ -349,6 +393,14 @@ def _persist_pdf_results(document, source_text_uuid, results):
         page.ocr_duration_ms = result.duration_ms
         page.preprocessing_version = result.preprocessing_version
         page.save()
+        if page_dims:
+            width, height = page_dims.get(page_number, (0, 0))
+            if width and height:
+                DocumentTextSpan.objects.filter(document_text_page=page).delete()
+                DocumentTextSpan.objects.bulk_create(
+                    _span_rows(page, width, height, result.lines),
+                    ignore_conflicts=True,
+                )
         _event(
             document,
             MedicalDocumentEvent.EventType.OCR_PAGE_COMPLETED,
@@ -392,7 +444,7 @@ def _persist_pdf_results(document, source_text_uuid, results):
     return extracted
 
 
-def _persist(document_uuid, source_text_uuid, results):
+def _persist(document_uuid, source_text_uuid, results, page_dims):
     try:
         with transaction.atomic():
             document = (
@@ -408,9 +460,10 @@ def _persist(document_uuid, source_text_uuid, results):
             if source_text_uuid is None:
                 if hasattr(document, "document_text"):
                     return _current_outcome(document)
-                extracted = _persist_image_result(document, results[1])
+                width, height = page_dims.get(1, (0, 0))
+                extracted = _persist_image_result(document, results[1], width, height)
             else:
-                extracted = _persist_pdf_results(document, source_text_uuid, results)
+                extracted = _persist_pdf_results(document, source_text_uuid, results, page_dims)
                 if extracted is None:
                     return _current_outcome(document)
             document.processing_status = (
@@ -444,6 +497,13 @@ def _persist(document_uuid, source_text_uuid, results):
                 from processing.date_services import schedule_date_processing
 
                 schedule_date_processing(document)
+                if (
+                    document.document_type
+                    == MedicalDocument.DocumentType.LABORATORY
+                ):
+                    from labs.services import schedule_lab_extraction
+
+                    schedule_lab_extraction(document)
             return document.processing_status
     except OCRError as exc:
         return _mark_failure(document_uuid, exc.code)
@@ -476,9 +536,11 @@ def process_ocr_document(
         preprocessor = preprocessor or ImagePreprocessor()
         renderer = renderer or PDFPageRenderer()
         results = {}
+        page_dims = {}
         if claim.document.stored_file.mime_type in IMAGE_MIME_TYPES:
             image = preprocessor.prepare(content)
             try:
+                page_dims[1] = image.size
                 results[1] = engine.extract_image(image)
             finally:
                 image.close()
@@ -490,6 +552,7 @@ def process_ocr_document(
                     continue
                 image = renderer.render(content, page_number)
                 try:
+                    page_dims[page_number] = image.size
                     results[page_number] = engine.extract_image(image)
                 finally:
                     image.close()
@@ -519,7 +582,7 @@ def process_ocr_document(
     except Exception:
         return _mark_failure(document_uuid, "ocr_failed")
 
-    outcome = _persist(document_uuid, claim.source_text_uuid, results)
+    outcome = _persist(document_uuid, claim.source_text_uuid, results, page_dims)
     if outcome == MedicalDocument.ProcessingStatus.TEXT_EXTRACTED:
         logger.info(
             "OCR processing completed",
