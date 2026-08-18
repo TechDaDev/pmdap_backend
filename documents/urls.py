@@ -8,6 +8,7 @@ from documents.api import (
     MedicalDocumentFileView,
     MedicalDocumentPendingConfirmationView,
 )
+from labs.api import LabResultsView
 
 urlpatterns = [
     path("", MedicalDocumentCollectionView.as_view(), name="medical-document-list"),
@@ -25,6 +26,11 @@ urlpatterns = [
         "<uuid:document_uuid>/file/",
         MedicalDocumentFileView.as_view(),
         name="medical-document-file",
+    ),
+    path(
+        "<uuid:document_uuid>/lab-results/",
+        LabResultsView.as_view(),
+        name="medical-document-lab-results",
     ),
     path(
         "<uuid:document_uuid>/date-candidates/",

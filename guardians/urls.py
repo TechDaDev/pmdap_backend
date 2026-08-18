@@ -11,6 +11,7 @@ from documents.api import (
     MinorMedicalDocumentPendingConfirmationView,
 )
 from guardians.api import MinorCollectionView, MinorDetailView
+from labs.api import MinorLabResultsView
 
 urlpatterns = [
     path("", MinorCollectionView.as_view(), name="minor-list-create"),
@@ -44,6 +45,11 @@ urlpatterns = [
         "<uuid:minor_uuid>/documents/<uuid:document_uuid>/file/",
         MinorMedicalDocumentFileView.as_view(),
         name="minor-medical-document-file",
+    ),
+    path(
+        "<uuid:minor_uuid>/documents/<uuid:document_uuid>/lab-results/",
+        MinorLabResultsView.as_view(),
+        name="minor-medical-document-lab-results",
     ),
     path(
         "<uuid:minor_uuid>/documents/<uuid:document_uuid>/date-candidates/",
