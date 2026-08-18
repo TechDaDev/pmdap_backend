@@ -271,6 +271,26 @@ class MedicalDocumentEvent(UUIDModel):
             "DATE_PROCESSING_FAILED",
             "Date processing failed",
         )
+        LAB_EXTRACTION_QUEUED = (
+            "LAB_EXTRACTION_QUEUED",
+            "Lab extraction queued",
+        )
+        LAB_EXTRACTION_STARTED = (
+            "LAB_EXTRACTION_STARTED",
+            "Lab extraction started",
+        )
+        LAB_EXTRACTION_COMPLETED = (
+            "LAB_EXTRACTION_COMPLETED",
+            "Lab extraction completed",
+        )
+        LAB_EXTRACTION_NOT_APPLICABLE = (
+            "LAB_EXTRACTION_NOT_APPLICABLE",
+            "Lab extraction not applicable",
+        )
+        LAB_EXTRACTION_FAILED = (
+            "LAB_EXTRACTION_FAILED",
+            "Lab extraction failed",
+        )
 
     document = models.ForeignKey(
         MedicalDocument,

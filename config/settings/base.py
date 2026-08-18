@@ -44,6 +44,7 @@ PROJECT_APPS = [
     "claims.apps.ClaimsConfig",
     "documents.apps.DocumentsConfig",
     "processing.apps.ProcessingConfig",
+    "labs.apps.LabsConfig",
     "archive.apps.ArchiveConfig",
     "facilities.apps.FacilitiesConfig",
     "audit.apps.AuditConfig",
@@ -221,6 +222,11 @@ OCR_TASK_MAX_RETRIES = int(os.getenv("OCR_TASK_MAX_RETRIES", "3"))
 OCR_TASK_RETRY_BASE_SECONDS = int(os.getenv("OCR_TASK_RETRY_BASE_SECONDS", "10"))
 OCR_TASK_SOFT_TIME_LIMIT = int(os.getenv("OCR_TASK_SOFT_TIME_LIMIT", str(25 * 60)))
 OCR_TASK_TIME_LIMIT = int(os.getenv("OCR_TASK_TIME_LIMIT", str(30 * 60)))
+
+# Structured lab extraction (geometry-backed, consumes persisted OCR spans).
+LAB_PIPELINE_VERSION = os.getenv("LAB_PIPELINE_VERSION", "lab-v1")
+LAB_TASK_SOFT_TIME_LIMIT = int(os.getenv("LAB_TASK_SOFT_TIME_LIMIT", str(5 * 60)))
+LAB_TASK_TIME_LIMIT = int(os.getenv("LAB_TASK_TIME_LIMIT", str(10 * 60)))
 
 # Identity extraction staging lifetime. A SUCCESSFUL extraction job keeps its
 # private staging images until the client finalizes (submit/replace) or this
