@@ -155,7 +155,7 @@ KNOWN_UNITS = {
     "nmol/l", "pmol/l", "mmol/ml", "meq/l", "mcg/dl", "mm/h", "mg", "ng",
     "pg", "g", "ug", "u", "iu", "x10^3/µl", "x10^3/ul", "x103/µl",
     "x103/ul", "x106/µl", "10^3/µl", "10^3/ul", "cells/µl", "cells/ul",
-    "u/dl", "g/100ml",
+    "u/dl", "u/", "g/100ml",
 }
 
 UNIT_SHAPE = re.compile(
@@ -171,6 +171,77 @@ def _is_unit(text: str) -> bool:
     # conservative: short unit-shaped tokens only (u/l, %, µL, fL); long prose
     # words like "negative" or "glucose" never count as units
     return len(key) <= 4 and bool(UNIT_SHAPE.match(key))
+
+
+# OCR-degraded cell-count units (x10^3/µL -> "x10%μL", "x103/µL" ...) must be
+# preserved; the token is Latin/symbol/digit only, so Arabic watermark strokes
+# and prose never match. Requires a digit or a µ/μ glyph to avoid a bare Latin
+# word ("LAB", "RBC") being mistaken for a unit.
+UNIT_CELL_LENIENT_RE = re.compile(
+    r"^[a-zA-Zµμ×x0-9/^%·.\-]{1,10}$", re.UNICODE
+)
+
+
+def _is_unit_cell(text: str) -> bool:
+    stripped = text.strip()
+    if _is_unit(stripped):
+        return True
+    if not UNIT_CELL_LENIENT_RE.match(stripped):
+        return False
+    # Requires a digit, a µ/μ glyph, or a slash (x/y shape) so a bare Latin
+    # word ("LAB", "RBC") is never mistaken for a unit, while OCR-degraded
+    # forms like "x10%μL" or "ulU/ml" (µIU/ml) are preserved.
+    return (
+        any(ch.isdigit() for ch in stripped)
+        or "μ" in stripped
+        or "µ" in stripped
+        or "/" in stripped
+    )
+
+
+def _is_cell_like(text: str) -> bool:
+    """True when a span could plausibly be table content (value/unit/flag/range).
+
+    Used to guard the geometric noise filter so oversized non-table strokes
+    (diagonal watermarks, stamps, signatures) are dropped from lab rows while
+    legitimate numeric/unit/range cells are never touched.
+    """
+    stripped = text.strip()
+    if _is_unit_cell(stripped) or _is_flag(stripped):
+        return True
+    return bool(
+        DECIMAL_RE.match(stripped)
+        or THRESHOLD_RE.match(stripped)
+        or RANGE_RE.match(stripped)
+        or RANGE_ANYWHERE_RE.search(stripped)
+    )
+
+
+def _drop_geometric_noise(row: list[Span]) -> list[Span]:
+    """Drop diagonal watermark / stamp strokes from a row before assembly.
+
+    Structural only (no vocabulary, no lab-name knowledge, no language): a
+    rotated watermark has an OCR box far taller than the row's normal text and
+    is never a value/unit/flag/range cell. Such a stroke is excluded from
+    LabResult association (canonical DocumentTextSpan rows are untouched).
+    Legitimate cells are never oversized-and-cell-like, so numeric/unit/range
+    content is preserved. Only rows with >= 3 spans are filtered so an isolated
+    large token (e.g. a title) is not nuked.
+    """
+    if len(row) < 3:
+        return row
+    heights = [span.y_max - span.y_min for span in row]
+    median_h = statistics.median(heights)
+    if median_h <= 0:
+        return row
+    threshold = median_h * 1.6
+    cleaned: list[Span] = []
+    for span in row:
+        oversized = (span.y_max - span.y_min) > threshold
+        if oversized and not _is_cell_like(span.text):
+            continue
+        cleaned.append(span)
+    return cleaned
 
 DECIMAL_RE = re.compile(r"^[+-]?\d{1,6}(?:[.,]\d{1,4})?$")
 
@@ -443,12 +514,12 @@ def _positional_semantics(row: list[Span]) -> list[str]:
         return ["TEST", "RESULT", "UNIT", "REFERENCE"] + ["REFERENCE"] * (n - 4)
     if n == 3:
         third = row[2].text.strip()
-        if _is_unit(third):
+        if _is_unit_cell(third):
             return ["TEST", "RESULT", "UNIT"]
         return ["TEST", "RESULT", "REFERENCE"]
     if n == 2:
         second = row[1].text.strip()
-        if _is_unit(second):
+        if _is_unit_cell(second):
             return ["TEST", "UNIT"]
         return ["TEST", "RESULT"]
     return ["TEST"]
@@ -513,10 +584,18 @@ def _assemble(
                 result_candidates.append(stripped)
                 result_text_parts.append(stripped)
             continue
-        if semantics == "UNIT" or (not seen_result and _is_unit(stripped)):
-            unit_candidates.append(stripped)
-            if semantics != "TEST":
+        if semantics == "UNIT":
+            # A cell in the unit column must actually look like a unit.
+            # Diagonal watermark strokes that land on the unit column (e.g. an
+            # Arabic lab watermark) are dropped, never accepted as units;
+            # OCR-degraded Latin cell-count units are preserved.
+            if _is_unit_cell(stripped):
+                unit_candidates.append(stripped)
                 seen_result = True
+            continue
+        if not seen_result and _is_unit_cell(stripped):
+            unit_candidates.append(stripped)
+            seen_result = True
             continue
         if semantics in {"REF_LOW", "REF_HIGH"}:
             decimal = _to_decimal(stripped)
@@ -647,6 +726,12 @@ def parse_page(
             pending_reference = None
             continue
         if _row_is_section(row):
+            continue
+
+        # Drop diagonal watermark / stamp strokes before column assignment so
+        # they can never contaminate unit/result/reference fields.
+        row = _drop_geometric_noise(row)
+        if not row:
             continue
 
         if not has_header:

@@ -3,6 +3,7 @@ from django.urls import path
 from archive.api import MinorArchiveSummaryView, MinorArchiveView
 from archive.search_api import MinorSearchView
 from documents.api import (
+    MinorExtractedContentView,
     MinorMedicalDocumentCollectionView,
     MinorMedicalDocumentDateCandidateView,
     MinorMedicalDocumentDateConfirmationView,
@@ -50,6 +51,11 @@ urlpatterns = [
         "<uuid:minor_uuid>/documents/<uuid:document_uuid>/lab-results/",
         MinorLabResultsView.as_view(),
         name="minor-medical-document-lab-results",
+    ),
+    path(
+        "<uuid:minor_uuid>/documents/<uuid:document_uuid>/extracted-content/",
+        MinorExtractedContentView.as_view(),
+        name="minor-medical-document-extracted-content",
     ),
     path(
         "<uuid:minor_uuid>/documents/<uuid:document_uuid>/date-candidates/",

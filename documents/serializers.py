@@ -208,3 +208,34 @@ class DocumentDateConfirmationResponseSerializer(serializers.ModelSerializer):
             "processing_status",
         )
         read_only_fields = fields
+
+
+class ExtractedContentSectionSerializer(serializers.Serializer):
+    """One narrative section (report title + paragraph body).
+
+    ``body`` is the joined, line-preserving text of the section's paragraph(s);
+    ``sequence`` is the first supporting span order (for stable ordering only,
+    never raw geometry). No OCR geometry or confidence is exposed.
+    """
+
+    heading = serializers.CharField()
+    body = serializers.CharField()
+    page_number = serializers.IntegerField()
+    sequence = serializers.IntegerField()
+
+
+class ExtractedContentResponseSerializer(serializers.Serializer):
+    """Patient-facing extracted-content envelope.
+
+    ``content_kind`` is ``NARRATIVE`` for narrative reports (radiology etc.),
+    ``LAB`` when the document is a structured lab table (client reads the
+    dedicated lab-results endpoint), or ``NONE`` when no extracted content is
+    applicable. ``status`` mirrors extraction progress. Sections carry no raw
+    OCR geometry and no storage keys.
+    """
+
+    document_uuid = serializers.UUIDField()
+    document_type = serializers.CharField()
+    content_kind = serializers.CharField()
+    status = serializers.CharField()
+    sections = ExtractedContentSectionSerializer(many=True)

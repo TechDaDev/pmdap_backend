@@ -24,18 +24,22 @@ from documents.serializers import (
     DateCandidateSerializer,
     DocumentDateConfirmationResponseSerializer,
     DocumentDateConfirmationSerializer,
+    ExtractedContentResponseSerializer,
+    ExtractedContentSectionSerializer,
     PendingDateConfirmationSerializer,
     MedicalDocumentDetailSerializer,
     MedicalDocumentMetadataSerializer,
     MedicalDocumentSerializer,
     MedicalDocumentUploadSerializer,
 )
+from documents.narrative import extract_narrative
 from documents.services import (
     create_medical_document,
     soft_delete_medical_document,
     update_medical_document,
 )
 from documents.throttling import MedicalDocumentUploadThrottle
+from labs.models import LabReportExtraction
 from patients.api import owned_profile
 
 
@@ -494,5 +498,114 @@ class MinorMedicalDocumentDateConfirmationView(MedicalDocumentDateConfirmationVi
 class MinorMedicalDocumentPendingConfirmationView(
     MedicalDocumentPendingConfirmationView
 ):
+    def get_patient(self, request, **kwargs):
+        return authorized_minor_patient(request, kwargs["minor_uuid"])
+
+
+class ExtractedContentView(APIView):
+    """Read-only extracted content for one owned document.
+
+    Narrative reports (radiology, imaging, letters) return sectioned body
+    text rebuilt from persisted OCR spans. Structured lab documents return
+    ``content_kind=LAB`` (the client reads the dedicated lab-results endpoint).
+    Owner-only; verification agents (no patient profile) are rejected with 403
+    and other patients' documents stay opaque (404). No raw geometry, no
+    storage keys, no OCR confidence is ever returned.
+    """
+
+    def get_patient(self, request, **kwargs):
+        del kwargs
+        return owned_profile(request.user)
+
+    def get_document(self, request, document_uuid, **kwargs):
+        return active_document(self.get_patient(request, **kwargs), document_uuid)
+
+    @extend_schema(
+        operation_id="medical_document_extracted_content",
+        summary="Extracted content (narrative) for one document",
+        description=(
+            "Read-only, owner-only. Returns narrative report sections rebuilt "
+            "from the patient's own uploaded report. Never returns raw OCR "
+            "geometry. Synthetic example only."
+        ),
+        responses={
+            200: envelope(
+                "ExtractedContentSuccess",
+                ExtractedContentResponseSerializer(read_only=True),
+            ),
+            401: inline_serializer(
+                "Unauthorized",
+                fields={"detail": "string"},
+            ),
+            403: inline_serializer(
+                "Forbidden",
+                fields={"detail": "string"},
+            ),
+            404: inline_serializer(
+                "NotFound",
+                fields={"detail": "string"},
+            ),
+        },
+        tags=["Medical documents"],
+    )
+    def get(self, request, document_uuid, **kwargs):
+        document = self.get_document(request, document_uuid, **kwargs)
+        return Response({"data": self._payload(document)})
+
+    @staticmethod
+    def _payload(document):
+        if document.document_type == MedicalDocument.DocumentType.LABORATORY:
+            extraction = (
+                LabReportExtraction.objects.filter(document=document)
+                .order_by("-created_at")
+                .first()
+            )
+            if extraction is not None:
+                status = extraction.status
+            elif (
+                document.processing_status == MedicalDocument.ProcessingStatus.FAILED
+                or not hasattr(document, "document_text")
+            ):
+                status = "FAILED"
+            else:
+                status = "QUEUED"
+            return {
+                "document_uuid": document.uuid,
+                "document_type": document.document_type,
+                "content_kind": "LAB",
+                "status": status,
+                "sections": [],
+            }
+        if not hasattr(document, "document_text"):
+            status = (
+                "FAILED"
+                if document.processing_status == MedicalDocument.ProcessingStatus.FAILED
+                else "QUEUED"
+            )
+            return {
+                "document_uuid": document.uuid,
+                "document_type": document.document_type,
+                "content_kind": "NONE",
+                "status": status,
+                "sections": [],
+            }
+        sections = extract_narrative(document)
+        return {
+            "document_uuid": document.uuid,
+            "document_type": document.document_type,
+            "content_kind": "NARRATIVE",
+            "status": "COMPLETED",
+            "sections": ExtractedContentSectionSerializer(sections, many=True).data,
+        }
+
+
+@extend_schema_view(
+    get=extend_schema(
+        operation_id="minor_medical_document_extracted_content"
+    ),
+)
+class MinorExtractedContentView(ExtractedContentView):
+    """Guardian-scoped extracted content for an authorized minor's document."""
+
     def get_patient(self, request, **kwargs):
         return authorized_minor_patient(request, kwargs["minor_uuid"])

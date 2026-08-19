@@ -1,6 +1,7 @@
 from django.urls import path
 
 from documents.api import (
+    ExtractedContentView,
     MedicalDocumentCollectionView,
     MedicalDocumentDateCandidateView,
     MedicalDocumentDateConfirmationView,
@@ -31,6 +32,11 @@ urlpatterns = [
         "<uuid:document_uuid>/lab-results/",
         LabResultsView.as_view(),
         name="medical-document-lab-results",
+    ),
+    path(
+        "<uuid:document_uuid>/extracted-content/",
+        ExtractedContentView.as_view(),
+        name="medical-document-extracted-content",
     ),
     path(
         "<uuid:document_uuid>/date-candidates/",
