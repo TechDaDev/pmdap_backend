@@ -91,7 +91,7 @@ def create_medical_document(*, patient, actor, upload, metadata, scanner=None):
     ).first()
     if existing is not None:
         _record_duplicate(existing, actor)
-        raise DuplicateMedicalDocument()
+        raise DuplicateMedicalDocument(existing.uuid)
 
     scan_result = (scanner or default_file_security_scanner).scan(validated.content)
     values = {key: metadata[key] for key in EDITABLE_METADATA_FIELDS if key in metadata}
@@ -193,7 +193,7 @@ def create_medical_document(*, patient, actor, upload, metadata, scanner=None):
         ).first()
         if existing is not None:
             _record_duplicate(existing, actor)
-            raise DuplicateMedicalDocument() from exc
+            raise DuplicateMedicalDocument(existing.uuid) from exc
         raise
     except OSError as exc:
         stored.file.storage.delete(persisted_name or storage_name)

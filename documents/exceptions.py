@@ -3,8 +3,14 @@ from rest_framework.exceptions import APIException
 
 class DuplicateMedicalDocument(APIException):
     status_code = 409
-    default_detail = "This medical document is already active for the patient."
-    default_code = "duplicate_medical_document"
+    default_detail = "This document is already in your archive."
+    default_code = "duplicate_document"
+
+    def __init__(self, existing_document_uuid=None):
+        data = {"detail": self.default_detail}
+        if existing_document_uuid is not None:
+            data["existing_document_uuid"] = str(existing_document_uuid)
+        super().__init__(detail=data)
 
 
 class MedicalDocumentNotFound(APIException):

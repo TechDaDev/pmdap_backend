@@ -490,8 +490,15 @@ def _persist(document_uuid, source_text_uuid, results, page_dims):
                     "character_count": extracted.character_count,
                 },
             )
+            # Duplicate protection: persist canonical-content fingerprint and,
+            # on a same-patient match, mark DUPLICATE_DETECTED (skips date/lab
+            # scheduling). Never mutates canonical OCR evidence.
+            from documents.fingerprint import apply_duplicate_detection
+
+            is_duplicate = apply_duplicate_detection(document) is not None
             if (
-                document.processing_status
+                not is_duplicate
+                and document.processing_status
                 == MedicalDocument.ProcessingStatus.TEXT_EXTRACTED
             ):
                 from processing.date_services import schedule_date_processing

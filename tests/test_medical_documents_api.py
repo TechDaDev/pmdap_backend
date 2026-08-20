@@ -253,9 +253,11 @@ def test_duplicate_unauthenticated_agent_and_unsupported_methods_are_stable(
             f"{COLLECTION}{created['uuid']}/", {}, format="json"
         )
 
-    assert_error(duplicate, 409, "duplicate_medical_document")
-    assert duplicate.data["error"]["details"] == {}
-    assert "uuid" not in str(duplicate.data)
+    assert_error(duplicate, 409, "duplicate_document")
+    # same-patient duplicate reveals only the existing document uuid.
+    assert duplicate.data["error"]["details"]["existing_document_uuid"] == created[
+        "uuid"
+    ]
     assert_error(unsupported, 405, "method_not_allowed")
 
     agent = User.objects.create_user(

@@ -228,6 +228,13 @@ LAB_PIPELINE_VERSION = os.getenv("LAB_PIPELINE_VERSION", "lab-v2")
 LAB_TASK_SOFT_TIME_LIMIT = int(os.getenv("LAB_TASK_SOFT_TIME_LIMIT", str(5 * 60)))
 LAB_TASK_TIME_LIMIT = int(os.getenv("LAB_TASK_TIME_LIMIT", str(10 * 60)))
 
+# Duplicate-protection content fingerprint key (HMAC-SHA256). Separate from the
+# JWT/SECRET_KEY material; falls back to a SECRET_KEY-derived value when unset.
+DOCUMENT_FINGERPRINT_SECRET = os.getenv(
+    "DOCUMENT_FINGERPRINT_SECRET", ""
+)
+
+
 # Identity extraction staging lifetime. A SUCCESSFUL extraction job keeps its
 # private staging images until the client finalizes (submit/replace) or this
 # TTL elapses, whichever comes first. The worker schedules a delayed

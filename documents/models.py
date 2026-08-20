@@ -105,6 +105,7 @@ class MedicalDocument(UUIDModel):
         AWAITING_CONFIRMATION = "AWAITING_CONFIRMATION", "Awaiting confirmation"
         DATE_CONFIRMED = "DATE_CONFIRMED", "Date confirmed"
         INDEXED = "INDEXED", "Indexed"
+        DUPLICATE_DETECTED = "DUPLICATE_DETECTED", "Duplicate detected"
         FAILED = "FAILED", "Failed"
 
     class ArchiveStatus(models.TextChoices):
@@ -160,6 +161,11 @@ class MedicalDocument(UUIDModel):
         choices=ProcessingStatus,
         default=ProcessingStatus.UPLOADED,
     )
+    # HMAC-SHA256 of normalized canonical OCR body. Internal only; never
+    # exposed to clients. Same-patient active match => duplicate candidate.
+    content_fingerprint = models.CharField(
+        max_length=64, blank=True, default="", editable=False
+    )
     processing_failure_code = models.CharField(max_length=64, blank=True, default="")
     processing_started_at = models.DateTimeField(null=True, blank=True)
     archive_status = models.CharField(
@@ -186,6 +192,10 @@ class MedicalDocument(UUIDModel):
             )
         ]
         indexes = [
+            models.Index(
+                fields=("patient", "content_fingerprint"),
+                name="patient_fingerprint_idx",
+            ),
             models.Index(
                 fields=("patient", "archive_status", "document_date"),
                 name="archive_status_date_idx",
@@ -236,6 +246,10 @@ class MedicalDocumentEvent(UUIDModel):
         DUPLICATE_REJECTED = (
             "MEDICAL_DOCUMENT_DUPLICATE_REJECTED",
             "Duplicate rejected",
+        )
+        DUPLICATE_DETECTED = (
+            "MEDICAL_DOCUMENT_DUPLICATE_DETECTED",
+            "Duplicate detected",
         )
         FILE_INTEGRITY_CHECKED = (
             "MEDICAL_FILE_INTEGRITY_CHECKED",
