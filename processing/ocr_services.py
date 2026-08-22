@@ -561,6 +561,10 @@ def _schedule_processing_pipeline(document, page_numbers):
     from documents.page_services import ensure_page_units
 
     units = ensure_page_units(document, source_pages=page_numbers)
+    if not units:
+        units = list(
+            document.pages.filter(page_number__in=page_numbers).order_by("page_number")
+        )
     if len(units) > 1:
         from labs.services import schedule_page_lab_extraction
         from processing.date_services import schedule_page_date_processing

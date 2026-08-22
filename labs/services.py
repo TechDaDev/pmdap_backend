@@ -378,8 +378,16 @@ def process_lab_extraction_for_page(
         spans = _page_spans(document, page.page_number)
         if classifier is None:
             classifier = detect_report_subtype
+        source_page = (
+            document.document_text.pages.filter(
+                page_number=page.page_number
+            ).first()
+            if hasattr(document, "document_text")
+            else None
+        )
+        page_text = source_page.text if source_page is not None else ""
         page.report_subtype = classifier(
-            "\n".join(span.text for span in spans)
+            "\n".join(span.text for span in spans) if spans else page_text
         )
         page.save(update_fields=("report_subtype", "updated_at"))
         parsed_rows = parser(page.page_number, spans)
