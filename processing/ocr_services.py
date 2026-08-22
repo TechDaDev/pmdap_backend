@@ -11,7 +11,12 @@ from django.utils import timezone
 
 from audit.models import AuditLog
 from audit.services import record_audit
-from documents.models import MedicalDocument, MedicalDocumentEvent, StoredFile
+from documents.models import (
+    MedicalDocument,
+    MedicalDocumentEvent,
+    MedicalDocumentPage,
+    StoredFile,
+)
 from processing.extraction import PAGE_SEPARATOR, TextUsabilityEvaluator
 from processing.models import DocumentText, DocumentTextPage, DocumentTextSpan
 from processing.ocr import (
@@ -229,6 +234,43 @@ def _page_still_required(document_uuid, source_text_uuid, page_number):
         page_number=page_number,
         requires_ocr=True,
     ).exists()
+
+
+def _mark_page_failure(document_uuid, page_number, code):
+    """Fail exactly one page unit; other pages keep processing."""
+    from documents.page_services import (
+        ensure_page_units,
+        recalculate_document_processing_state,
+    )
+
+    with transaction.atomic():
+        document = (
+            MedicalDocument.objects.select_for_update()
+            .filter(uuid=document_uuid)
+            .first()
+        )
+        if (
+            document is None
+            or document.archive_status != MedicalDocument.ArchiveStatus.ACTIVE
+        ):
+            return "SKIPPED"
+        ensure_page_units(document, source_pages=[page_number])
+        unit = document.pages.get(page_number=page_number)
+        unit.processing_status = MedicalDocumentPage.ProcessingStatus.FAILED
+        unit.processing_failure_code = code
+        unit.save(
+            update_fields=("processing_status", "processing_failure_code", "updated_at")
+        )
+        recalculate_document_processing_state(document)
+    logger.warning(
+        "Page OCR failed",
+        extra={
+            "document_uuid": str(document_uuid),
+            "page_number": page_number,
+            "failure_code": code,
+        },
+    )
+    return MedicalDocumentPage.ProcessingStatus.FAILED
 
 
 def _valid_result(result):
@@ -501,21 +543,45 @@ def _persist(document_uuid, source_text_uuid, results, page_dims):
                 and document.processing_status
                 == MedicalDocument.ProcessingStatus.TEXT_EXTRACTED
             ):
-                from processing.date_services import schedule_date_processing
-
-                schedule_date_processing(document)
-                if (
-                    document.document_type
-                    == MedicalDocument.DocumentType.LABORATORY
-                ):
-                    from labs.services import schedule_lab_extraction
-
-                    schedule_lab_extraction(document)
+                _schedule_processing_pipeline(document, sorted(results.keys()))
             return document.processing_status
     except OCRError as exc:
         return _mark_failure(document_uuid, exc.code)
     except DatabaseError:
         return _mark_failure(document_uuid, "ocr_persistence_failed")
+
+
+def _schedule_processing_pipeline(document, page_numbers):
+    """Create page units and enqueue processing for the document.
+
+    Multi-page PDF: INDEPENDENT per-page date/lab tasks (failure-isolated).
+    Single-page (image/1-page PDF): existing document-level date/lab dispatch
+    (page-1 unit is kept in sync by the document-level pipelines).
+    """
+    from documents.page_services import ensure_page_units
+
+    units = ensure_page_units(document, source_pages=page_numbers)
+    if len(units) > 1:
+        from labs.services import schedule_page_lab_extraction
+        from processing.date_services import schedule_page_date_processing
+
+        for unit in units:
+            unit.processing_status = MedicalDocumentPage.ProcessingStatus.EXTRACTING
+            unit.save(update_fields=("processing_status", "updated_at"))
+            schedule_page_date_processing(unit)
+            if document.document_type == MedicalDocument.DocumentType.LABORATORY:
+                schedule_page_lab_extraction(unit)
+        return
+    unit = units[0]
+    unit.processing_status = MedicalDocumentPage.ProcessingStatus.EXTRACTING
+    unit.save(update_fields=("processing_status", "updated_at"))
+    from processing.date_services import schedule_date_processing
+
+    schedule_date_processing(document)
+    if document.document_type == MedicalDocument.DocumentType.LABORATORY:
+        from labs.services import schedule_lab_extraction
+
+        schedule_lab_extraction(document)
 
 
 def process_ocr_document(
@@ -557,12 +623,27 @@ def process_ocr_document(
                     document_uuid, claim.source_text_uuid, page_number
                 ):
                     continue
-                image = renderer.render(content, page_number)
                 try:
-                    page_dims[page_number] = image.size
-                    results[page_number] = engine.extract_image(image)
-                finally:
-                    image.close()
+                    image = renderer.render(content, page_number)
+                    try:
+                        page_dims[page_number] = image.size
+                        results[page_number] = engine.extract_image(image)
+                    finally:
+                        image.close()
+                except (MemoryError, OSError) as exc:
+                    # Isolate this page; sibling pages keep processing.
+                    _mark_page_failure(
+                        document_uuid, page_number, "ocr_page_resource_retryable"
+                    )
+                    logger.warning(
+                        "Page OCR resource failure (isolated)",
+                        extra={
+                            "document_uuid": str(document_uuid),
+                            "page_number": page_number,
+                            "error": str(exc),
+                        },
+                    )
+                    continue
         if not results:
             return _current_outcome(claim.document)
         if any(not _valid_result(result) for result in results.values()):

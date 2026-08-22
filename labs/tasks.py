@@ -13,3 +13,14 @@ def extract_lab_results(self, document_uuid):
     from labs.services import process_lab_extraction
 
     return process_lab_extraction(document_uuid)
+
+@shared_task(
+    name="labs.extract_page_lab_results",
+    soft_time_limit=settings.LAB_TASK_SOFT_TIME_LIMIT,
+    time_limit=settings.LAB_TASK_TIME_LIMIT,
+)
+def extract_page_lab_results(page_unit_uuid):
+    """Structured lab extraction for ONE report page unit (failure-isolated)."""
+    from labs.services import process_lab_extraction_for_page
+
+    return process_lab_extraction_for_page(page_unit_uuid)

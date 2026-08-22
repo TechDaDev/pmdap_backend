@@ -234,6 +234,60 @@ class DocumentDateConfirmationResponseSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class MedicalDocumentPageSummaryItemSerializer(serializers.Serializer):
+    """Safe page-unit summary — no OCR body, no values, no geometry."""
+
+    page_number = serializers.IntegerField()
+    report_subtype = serializers.CharField()
+    processing_status = serializers.CharField()
+    document_date = serializers.DateField()
+    date_verified = serializers.BooleanField()
+    lab_result_count = serializers.IntegerField()
+    date_candidate_count = serializers.IntegerField()
+
+
+class MedicalDocumentPageSummarySerializer(serializers.Serializer):
+    document_uuid = serializers.UUIDField()
+    page_count = serializers.IntegerField()
+    pages = MedicalDocumentPageSummaryItemSerializer(many=True)
+
+
+class MedicalDocumentPageDetailSerializer(serializers.Serializer):
+    """One report page unit with its own date candidates + lab results."""
+
+    document_uuid = serializers.UUIDField()
+    page_number = serializers.IntegerField()
+    page_count = serializers.IntegerField()
+    report_subtype = serializers.CharField()
+    processing_status = serializers.CharField()
+    processing_failure_code = serializers.CharField()
+    document_date = serializers.DateField()
+    date_verified = serializers.BooleanField()
+    date_source = serializers.CharField()
+    lab_result_count = serializers.IntegerField()
+    detected_candidates = DateCandidateSerializer(many=True)
+    lab_results = serializers.ListField(child=serializers.DictField(), required=False)
+
+
+class MedicalDocumentPageDateConfirmationSerializer(
+    RejectUnknownFieldsMixin,
+    serializers.Serializer,
+):
+    candidate_id = serializers.UUIDField(required=False)
+    date = serializers.DateField(required=False)
+
+    def validate(self, attrs):
+        if ("candidate_id" in attrs) == ("date" in attrs):
+            from documents.exceptions import InvalidDateConfirmation
+
+            raise InvalidDateConfirmation()
+        if "date" in attrs and attrs["date"] > timezone.localdate():
+            from documents.exceptions import InvalidDocumentDate
+
+            raise InvalidDocumentDate()
+        return attrs
+
+
 class ExtractedContentSectionSerializer(serializers.Serializer):
     """One narrative section (report title + paragraph body).
 

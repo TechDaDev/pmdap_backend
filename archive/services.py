@@ -7,6 +7,7 @@ from django.db.models.functions import ExtractMonth, ExtractYear
 
 from documents.date_services import pending_confirmation_queryset
 from documents.models import MedicalDocument
+from documents.page_services import pending_page_units
 
 logger = logging.getLogger(__name__)
 
@@ -73,9 +74,14 @@ class ArchiveQueryService:
         return queryset.order_by(*VERIFIED_ORDERING)
 
     def unconfirmed_queryset(self, filters):
-        # Same authoritative domain rule as the confirm-dates queue (active +
-        # AWAITING_CONFIRMATION + not user-confirmed).
-        queryset = pending_confirmation_queryset(self.patient).select_related(
+        # Distinct documents that have at least one pending report-page unit
+        # (same authoritative rule as the confirm-dates queue). Archive still
+        # shows ONE card per source document even for multi-page PDFs.
+        pending_ids = pending_page_units(self.patient).values("document_id")
+        queryset = MedicalDocument.objects.filter(
+            pk__in=pending_ids,
+            archive_status=MedicalDocument.ArchiveStatus.ACTIVE,
+        ).select_related(
             "healthcare_facility__country",
             "healthcare_facility__region",
             "healthcare_facility__city",
@@ -87,7 +93,9 @@ class ArchiveQueryService:
         return queryset.order_by(*UNCONFIRMED_ORDERING)
 
     def unconfirmed_count(self):
-        return pending_confirmation_queryset(self.patient).count()
+        # Page units, not source documents — a 3-page PDF contributes 3 so the
+        # Home badge, queue page, and archive count can never drift.
+        return pending_page_units(self.patient).count()
 
     def summary(self):
         active = self._active_queryset()

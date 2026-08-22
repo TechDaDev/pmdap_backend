@@ -8,7 +8,11 @@ from django.conf import settings
 from django.db import DatabaseError, transaction
 from django.utils import timezone
 
-from documents.models import MedicalDocument, MedicalDocumentEvent
+from documents.models import (
+    MedicalDocument,
+    MedicalDocumentEvent,
+    MedicalDocumentPage,
+)
 from processing.dates import choose_suggested_index, detect_page_dates
 from processing.models import DateCandidate
 
@@ -297,6 +301,9 @@ def _persist(claim, candidates):
                 "updated_at",
             )
         )
+        from documents.page_services import sync_document_to_page_units
+
+        sync_document_to_page_units(document)
         _event(
             document,
             (
@@ -368,3 +375,179 @@ def process_date_candidates(
         },
     )
     return outcome
+
+
+# --------------------------------------------------------------------------- #
+# Page-scoped date processing (multi-page PDFs)
+# --------------------------------------------------------------------------- #
+
+
+def schedule_page_date_processing(page_unit):
+    _event(
+        page_unit.document,
+        MedicalDocumentEvent.EventType.DATE_PROCESSING_QUEUED,
+        {"page_number": page_unit.page_number},
+    )
+    transaction.on_commit(
+        lambda: _enqueue_page_date(str(page_unit.uuid))
+    )
+
+
+def _enqueue_page_date(page_unit_uuid):
+    from processing.tasks import detect_page_dates
+
+    try:
+        detect_page_dates.delay(page_unit_uuid)
+    except Exception:
+        logger.error(
+            "Page date processing enqueue failed",
+            extra={"page_unit_uuid": page_unit_uuid},
+        )
+
+
+def process_page_date_candidates(page_unit_uuid, *, detector=detect_page_dates):
+    """Detect date candidates for ONE report page unit (page text only).
+
+    Page text is the ONLY input — no cross-page date leakage. Candidates are
+    scoped to the page unit; the page then advances toward AWAITING_CONFIRMATION
+    once its lab extraction is also terminal.
+    """
+    from documents.page_services import _finalize_page
+
+    started = time.monotonic()
+    try:
+        with transaction.atomic():
+            page = (
+                MedicalDocumentPage.objects.select_for_update()
+                .select_related("document")
+                .filter(uuid=page_unit_uuid)
+                .first()
+            )
+            if page is None or (
+                page.document.archive_status
+                != MedicalDocument.ArchiveStatus.ACTIVE
+            ):
+                return "SKIPPED"
+            document = page.document
+            source_page = (
+                document.document_text.pages.filter(
+                    page_number=page.page_number
+                ).first()
+                if hasattr(document, "document_text")
+                else None
+            )
+            if source_page is None:
+                _finalize_page(page)
+                return page.processing_status
+            text = source_page.text
+            source = (
+                DateCandidate.Source.OCR
+                if source_page.effective_source == "OCR"
+                else DateCandidate.Source.PDF_TEXT
+            )
+    except DatabaseError as exc:
+        raise RetryableDateProcessingError("date_database_retryable") from exc
+
+    if not _configuration_valid():
+        return _mark_page_failure(page, "date_configuration_invalid")
+    try:
+        candidates = detector(
+            text,
+            page_number=page.page_number,
+            source=source,
+            context_max_chars=settings.DATE_CONTEXT_MAX_CHARS,
+            future_tolerance_days=settings.DATE_FUTURE_TOLERANCE_DAYS,
+        )
+        if len(candidates) > settings.DATE_MAX_CANDIDATES_PER_DOCUMENT:
+            raise DateProcessingError("date_candidate_limit_exceeded")
+    except DateProcessingError as exc:
+        return _mark_page_failure(page, exc.code)
+    except Exception:
+        return _mark_page_failure(page, "date_processing_failed")
+
+    _persist_page_candidates(page, candidates, started_at=started)
+    return page.processing_status
+
+
+def _mark_page_failure(page, code):
+    from documents.page_services import recalculate_document_processing_state
+
+    page.processing_status = MedicalDocumentPage.ProcessingStatus.FAILED
+    page.processing_failure_code = code
+    page.save(
+        update_fields=("processing_status", "processing_failure_code", "updated_at")
+    )
+    recalculate_document_processing_state(page.document)
+    return page.processing_status
+
+
+def _persist_page_candidates(page, candidates, *, started_at=None):
+    from documents.page_services import recalculate_document_processing_state
+
+    with transaction.atomic():
+        document = page.document
+        suggested_index = choose_suggested_index(
+            candidates,
+            minimum_score=settings.DATE_SUGGESTION_MIN_SCORE,
+            tie_tolerance=settings.DATE_SUGGESTION_TIE_TOLERANCE,
+        )
+        candidate_set_uuid = uuid.uuid4()
+        DateCandidate.objects.filter(
+            document=document, page_number=page.page_number, is_current=True
+        ).update(is_current=False)
+        DateCandidate.objects.bulk_create(
+            [
+                DateCandidate(
+                    document=document,
+                    page_unit=page,
+                    detected_date=candidate.detected_date,
+                    alternative_date=candidate.alternative_date,
+                    raw_value=candidate.raw_value,
+                    normalized_value=candidate.normalized_value,
+                    candidate_type=candidate.candidate_type.value,
+                    score=candidate.score,
+                    page_number=candidate.page_number,
+                    context=candidate.context,
+                    source=candidate.source,
+                    occurrence_index=candidate.occurrence_index,
+                    ambiguous=candidate.ambiguous,
+                    parsing_rule=candidate.parsing_rule,
+                    pipeline_version=settings.DATE_PIPELINE_VERSION,
+                    is_suggested=index == suggested_index,
+                    candidate_set_uuid=candidate_set_uuid,
+                    is_current=True,
+                )
+                for index, candidate in enumerate(candidates)
+            ]
+        )
+        _event(
+            document,
+            (
+                MedicalDocumentEvent.EventType.DATE_CANDIDATES_DETECTED
+                if candidates
+                else MedicalDocumentEvent.EventType.DATE_NOT_FOUND
+            ),
+            {
+                "page_number": page.page_number,
+                "candidate_count": len(candidates),
+                "suggestion_present": suggested_index is not None,
+                "pipeline_version": settings.DATE_PIPELINE_VERSION,
+                "candidate_set_uuid": str(candidate_set_uuid),
+            },
+        )
+    if started_at is not None:
+        logger.info(
+            "Page date processing completed",
+            extra={
+                "document_uuid": str(document.uuid),
+                "page_number": page.page_number,
+                "candidate_count": len(candidates),
+                "duration_ms": int((time.monotonic() - started_at) * 1000),
+                "pipeline_version": settings.DATE_PIPELINE_VERSION,
+            },
+        )
+    # Advance page once lab extraction is also terminal.
+    from documents.page_services import _finalize_page
+
+    _finalize_page(page)
+    return page.processing_status

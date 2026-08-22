@@ -328,9 +328,16 @@ def _persist_result(document_uuid, result, *, reprocess=False):
 
                 schedule_ocr(document)
             elif outcome == MedicalDocument.ProcessingStatus.TEXT_EXTRACTED:
-                from processing.date_services import schedule_date_processing
+                if result.page_count > 1:
+                    from processing.ocr_services import _schedule_processing_pipeline
 
-                schedule_date_processing(document)
+                    _schedule_processing_pipeline(
+                        document, list(range(1, result.page_count + 1))
+                    )
+                else:
+                    from processing.date_services import schedule_date_processing
+
+                    schedule_date_processing(document)
             return outcome
     except DatabaseError:
         return _mark_failure(document_uuid, "pdf_persistence_failed")

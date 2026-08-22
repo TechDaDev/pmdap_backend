@@ -22,6 +22,13 @@ class LabReportExtraction(UUIDModel):
         on_delete=models.PROTECT,
         related_name="lab_extractions",
     )
+    page_unit = models.ForeignKey(
+        "documents.MedicalDocumentPage",
+        on_delete=models.CASCADE,
+        related_name="lab_extractions",
+        null=True,
+        blank=True,
+    )
     pipeline_version = models.CharField(max_length=32)
     status = models.CharField(max_length=16, choices=Status, default=Status.QUEUED)
     error_code = models.CharField(max_length=64, blank=True, default="")
@@ -33,7 +40,13 @@ class LabReportExtraction(UUIDModel):
         constraints = [
             models.UniqueConstraint(
                 fields=("document", "pipeline_version"),
+                condition=models.Q(page_unit__isnull=True),
                 name="labs_unique_document_pipeline_version",
+            ),
+            models.UniqueConstraint(
+                fields=("page_unit", "pipeline_version"),
+                condition=models.Q(page_unit__isnull=False),
+                name="labs_unique_page_unit_pipeline_version",
             ),
             models.CheckConstraint(
                 condition=(

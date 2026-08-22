@@ -72,3 +72,15 @@ def detect_document_dates(self, document_uuid):
             countdown=countdown,
             max_retries=settings.DATE_TASK_MAX_RETRIES,
         ) from exc
+
+
+@shared_task(
+    name="processing.detect_page_dates",
+    soft_time_limit=settings.DATE_TASK_SOFT_TIME_LIMIT,
+    time_limit=settings.DATE_TASK_TIME_LIMIT,
+)
+def detect_page_dates(page_unit_uuid):
+    """Independent date detection for ONE report page unit."""
+    from processing.date_services import process_page_date_candidates
+
+    return process_page_date_candidates(page_unit_uuid)

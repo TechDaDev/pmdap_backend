@@ -106,6 +106,7 @@ class MedicalDocument(UUIDModel):
         DATE_CONFIRMED = "DATE_CONFIRMED", "Date confirmed"
         INDEXED = "INDEXED", "Indexed"
         DUPLICATE_DETECTED = "DUPLICATE_DETECTED", "Duplicate detected"
+        PARTIAL = "PARTIAL", "Partially processed"
         FAILED = "FAILED", "Failed"
 
     class ArchiveStatus(models.TextChoices):
@@ -216,6 +217,75 @@ class MedicalDocument(UUIDModel):
 
     def __str__(self):
         return str(self.uuid)
+
+
+class MedicalDocumentPage(UUIDModel):
+    """One report/processing unit of a MedicalDocument.
+
+    A single uploaded PDF stays ONE archived source MedicalDocument; each page
+    is its own processing unit with independent OCR/date/lab state so one bad
+    page can never block the rest of the document.
+    """
+
+    class ProcessingStatus(models.TextChoices):
+        QUEUED = "QUEUED", "Queued"
+        OCR_PROCESSING = "OCR_PROCESSING", "OCR processing"
+        EXTRACTING = "EXTRACTING", "Extracting results"
+        AWAITING_CONFIRMATION = "AWAITING_CONFIRMATION", "Awaiting confirmation"
+        READY = "READY", "Ready"
+        FAILED = "FAILED", "Failed"
+
+    class ReportSubtype(models.TextChoices):
+        LAB_CHEMISTRY = "LAB_CHEMISTRY", "Chemistry"
+        LAB_HORMONES = "LAB_HORMONES", "Hormones"
+        LAB_CBC = "LAB_CBC", "CBC"
+        RADIOLOGY = "RADIOLOGY", "Radiology"
+        NARRATIVE = "NARRATIVE", "Narrative"
+        UNKNOWN = "UNKNOWN", "Unknown"
+
+    document = models.ForeignKey(
+        MedicalDocument,
+        on_delete=models.CASCADE,
+        related_name="pages",
+    )
+    page_number = models.PositiveIntegerField()
+    processing_status = models.CharField(
+        max_length=24,
+        choices=ProcessingStatus,
+        default=ProcessingStatus.QUEUED,
+    )
+    report_subtype = models.CharField(
+        max_length=24,
+        choices=ReportSubtype,
+        default=ReportSubtype.UNKNOWN,
+    )
+    document_date = models.DateField(null=True, blank=True)
+    date_verified = models.BooleanField(default=False)
+    date_source = models.CharField(max_length=24, blank=True, default="")
+    date_verified_at = models.DateTimeField(null=True, blank=True)
+    processing_failure_code = models.CharField(max_length=64, blank=True, default="")
+
+    class Meta:
+        ordering = ("page_number",)
+        constraints = [
+            models.UniqueConstraint(
+                fields=("document", "page_number"),
+                name="documents_unique_document_page",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(page_number__gte=1),
+                name="documents_page_number_positive",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=("document", "page_number", "processing_status"),
+                name="documents_page_status_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.document_id}:{self.page_number}"
 
 
 class MedicalDocumentEvent(UUIDModel):

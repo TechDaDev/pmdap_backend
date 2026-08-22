@@ -7,6 +7,10 @@ from documents.api import (
     MedicalDocumentDateConfirmationView,
     MedicalDocumentDetailView,
     MedicalDocumentFileView,
+    MedicalDocumentPageDateConfirmationView,
+    MedicalDocumentPageDetailView,
+    MedicalDocumentPageLabResultsView,
+    MedicalDocumentPageListView,
     MedicalDocumentPendingConfirmationView,
 )
 from labs.api import LabResultsView
@@ -17,6 +21,26 @@ urlpatterns = [
         "date-confirmations/pending/",
         MedicalDocumentPendingConfirmationView.as_view(),
         name="medical-document-date-confirmations-pending",
+    ),
+    path(
+        "<uuid:document_uuid>/pages/",
+        MedicalDocumentPageListView.as_view(),
+        name="medical-document-pages",
+    ),
+    path(
+        "<uuid:document_uuid>/pages/<int:page_number>/lab-results/",
+        MedicalDocumentPageLabResultsView.as_view(),
+        name="medical-document-page-lab-results",
+    ),
+    path(
+        "<uuid:document_uuid>/pages/<int:page_number>/confirm-date/",
+        MedicalDocumentPageDateConfirmationView.as_view(),
+        name="medical-document-page-confirm-date",
+    ),
+    path(
+        "<uuid:document_uuid>/pages/<int:page_number>/",
+        MedicalDocumentPageDetailView.as_view(),
+        name="medical-document-page-detail",
     ),
     path(
         "<uuid:document_uuid>/",

@@ -163,6 +163,13 @@ class DateCandidate(UUIDModel):
         on_delete=models.PROTECT,
         related_name="date_candidates",
     )
+    page_unit = models.ForeignKey(
+        "documents.MedicalDocumentPage",
+        on_delete=models.CASCADE,
+        related_name="date_candidates",
+        null=True,
+        blank=True,
+    )
     detected_date = models.DateField()
     alternative_date = models.DateField(null=True, blank=True)
     raw_value = models.CharField(max_length=64)

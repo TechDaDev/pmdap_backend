@@ -261,6 +261,10 @@ def _persist(document, parsed_rows, *, elapsed_ms):
     except Exception:
         return _mark_failure(document)
 
+    from documents.page_services import sync_document_to_page_units
+
+    sync_document_to_page_units(document)
+
     event_type = (
         MedicalDocumentEvent.EventType.LAB_EXTRACTION_COMPLETED
         if parsed_rows
@@ -304,6 +308,245 @@ def _evidence_span_ids(document, row):
         document_text_page__page_number=row.page_number,
         sequence__in=row.evidence_sequence,
     )
+
+
+# --------------------------------------------------------------------------- #
+# Page-scoped extraction (multi-page PDFs)
+# --------------------------------------------------------------------------- #
+
+
+def schedule_page_lab_extraction(page_unit):
+    _event(
+        page_unit.document,
+        MedicalDocumentEvent.EventType.LAB_EXTRACTION_QUEUED,
+        {"page_number": page_unit.page_number},
+    )
+    transaction.on_commit(
+        lambda: _enqueue_page_lab_extraction(str(page_unit.uuid))
+    )
+
+
+def _enqueue_page_lab_extraction(page_unit_uuid):
+    from labs.tasks import extract_page_lab_results
+
+    try:
+        extract_page_lab_results.delay(page_unit_uuid)
+    except Exception:
+        logger.error(
+            "Page lab extraction enqueue failed",
+            extra={"page_unit_uuid": page_unit_uuid},
+        )
+
+
+def process_lab_extraction_for_page(
+    page_unit_uuid, *, parser=parse_page, classifier=None
+):
+    """Run structured lab extraction for ONE report page unit.
+
+    Input: persisted spans for exactly that page. Output: one page-scoped
+    LabReportExtraction + LabResult rows. Never queries other pages. A page
+    parse failure fails only this page.
+    """
+    from documents.models import MedicalDocumentPage
+    from documents.page_services import (
+        detect_report_subtype,
+        _finalize_page,
+    )
+
+    started = time.monotonic()
+    try:
+        with transaction.atomic():
+            page = (
+                MedicalDocumentPage.objects.select_for_update()
+                .select_related("document")
+                .filter(uuid=page_unit_uuid)
+                .first()
+            )
+            if page is None or (
+                page.document.archive_status
+                != MedicalDocument.ArchiveStatus.ACTIVE
+            ):
+                return "SKIPPED"
+            document = page.document
+            if document.document_type != MedicalDocument.DocumentType.LABORATORY:
+                _finalize_page(page)
+                return LabReportExtraction.Status.NOT_APPLICABLE
+    except DatabaseError:
+        return "SKIPPED"
+
+    try:
+        spans = _page_spans(document, page.page_number)
+        if classifier is None:
+            classifier = detect_report_subtype
+        page.report_subtype = classifier(
+            "\n".join(span.text for span in spans)
+        )
+        page.save(update_fields=("report_subtype", "updated_at"))
+        parsed_rows = parser(page.page_number, spans)
+    except Exception:
+        return _mark_page_failure(page)
+
+    return _persist_page(
+        page, parsed_rows, elapsed_ms=int((time.monotonic() - started) * 1000)
+    )
+
+
+def _page_spans(document, page_number):
+    from labs.parsing import Span
+
+    page = (
+        document.document_text.pages.filter(page_number=page_number).first()
+        if hasattr(document, "document_text")
+        else None
+    )
+    if page is None:
+        return []
+    return [
+        Span(
+            page_number=page.page_number,
+            sequence=span.sequence,
+            text=span.text,
+            confidence=span.confidence,
+            x_min=span.x_min,
+            y_min=span.y_min,
+            x_max=span.x_max,
+            y_max=span.y_max,
+        )
+        for span in page.spans.order_by("sequence")
+    ]
+
+
+def _persist_page(page, parsed_rows, *, elapsed_ms):
+    from documents.page_services import _finalize_page
+
+    try:
+        with transaction.atomic():
+            extraction, _ = LabReportExtraction.objects.get_or_create(
+                document=page.document,
+                page_unit=page,
+                pipeline_version=settings.LAB_PIPELINE_VERSION,
+            )
+            extraction.results.all().delete()
+            created = []
+            for row in parsed_rows:
+                result = LabResult(
+                    extraction=extraction,
+                    page_number=row.page_number,
+                    row_index=row.row_index,
+                    test_name_raw=row.test_name_raw,
+                    test_name_normalized=normalize_test_name(row.test_name_raw),
+                    result_raw=row.result_raw,
+                    result_numeric=row.result_numeric,
+                    result_text=row.result_text,
+                    unit_raw=row.unit_raw,
+                    unit_normalized=normalize_unit(row.unit_raw),
+                    reference_range_raw=row.reference_range_raw,
+                    reference_low=row.reference_low,
+                    reference_high=row.reference_high,
+                    flag_raw=row.flag_raw,
+                    extraction_confidence=row.extraction_confidence,
+                )
+                result.save()
+                created.append((result, row))
+            for result, row in created:
+                span_ids = _page_evidence_span_ids(page, row)
+                if span_ids:
+                    result.source_spans.set(span_ids)
+            confidences = [row.extraction_confidence for row in parsed_rows]
+            extraction.status = (
+                LabReportExtraction.Status.COMPLETED
+                if parsed_rows
+                else LabReportExtraction.Status.NOT_APPLICABLE
+            )
+            extraction.result_count = len(parsed_rows)
+            extraction.extraction_confidence = (
+                sum(confidences) / len(confidences) if confidences else None
+            )
+            extraction.error_code = ""
+            extraction.save(
+                update_fields=(
+                    "status",
+                    "result_count",
+                    "extraction_confidence",
+                    "error_code",
+                    "updated_at",
+                )
+            )
+    except DatabaseError:
+        return _mark_page_failure(page)
+    except Exception:
+        return _mark_page_failure(page)
+
+    event_type = (
+        MedicalDocumentEvent.EventType.LAB_EXTRACTION_COMPLETED
+        if parsed_rows
+        else MedicalDocumentEvent.EventType.LAB_EXTRACTION_NOT_APPLICABLE
+    )
+    _event(
+        page.document,
+        event_type,
+        {
+            "page_number": page.page_number,
+            "pipeline_version": settings.LAB_PIPELINE_VERSION,
+            "result_count": len(parsed_rows),
+            "elapsed_ms": elapsed_ms,
+        },
+    )
+    logger.info(
+        "Page lab extraction completed",
+        extra={
+            "document_uuid": str(page.document.uuid),
+            "page_number": page.page_number,
+            "pipeline_version": settings.LAB_PIPELINE_VERSION,
+            "result_count": len(parsed_rows),
+        },
+    )
+    _finalize_page(page)
+    return (
+        LabReportExtraction.Status.COMPLETED
+        if parsed_rows
+        else LabReportExtraction.Status.NOT_APPLICABLE
+    )
+
+
+def _page_evidence_span_ids(page, row):
+    from processing.models import DocumentTextSpan
+
+    return DocumentTextSpan.objects.filter(
+        document_text_page__document_text__document=page.document,
+        document_text_page__page_number=page.page_number,
+        sequence__in=row.evidence_sequence,
+    )
+
+
+def _mark_page_failure(page):
+    try:
+        with transaction.atomic():
+            extraction, _ = LabReportExtraction.objects.get_or_create(
+                document=page.document,
+                page_unit=page,
+                pipeline_version=settings.LAB_PIPELINE_VERSION,
+            )
+            extraction.results.all().delete()
+            extraction.status = LabReportExtraction.Status.FAILED
+            extraction.error_code = "lab_parse_failed"
+            extraction.result_count = 0
+            extraction.extraction_confidence = None
+            extraction.save(
+                update_fields=(
+                    "status",
+                    "error_code",
+                    "result_count",
+                    "extraction_confidence",
+                    "updated_at",
+                )
+            )
+    except DatabaseError:
+        pass
+    from documents.page_services import _finalize_page
+
+    _finalize_page(page)
+    return LabReportExtraction.Status.FAILED
 
 
 def _mark_failure(document):

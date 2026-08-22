@@ -19,6 +19,12 @@ class MedicalDocumentNotFound(APIException):
     default_code = "medical_document_not_found"
 
 
+class MedicalDocumentPageNotFound(APIException):
+    status_code = 404
+    default_detail = "Medical document page not found."
+    default_code = "medical_document_page_not_found"
+
+
 class MedicalFileStorageFailed(APIException):
     status_code = 503
     default_detail = "Medical file storage is temporarily unavailable."

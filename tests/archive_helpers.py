@@ -91,6 +91,26 @@ def make_document(
                 datetime.UTC,
             )
         MedicalDocument.objects.filter(pk=document.pk).update(created_at=created_at)
+    from documents.models import MedicalDocumentPage
+
+    page_status = {
+        "DATE_CONFIRMED": MedicalDocumentPage.ProcessingStatus.READY,
+        "AWAITING_CONFIRMATION": (
+            MedicalDocumentPage.ProcessingStatus.AWAITING_CONFIRMATION
+        ),
+        "PARTIAL": MedicalDocumentPage.ProcessingStatus.AWAITING_CONFIRMATION,
+        "FAILED": MedicalDocumentPage.ProcessingStatus.FAILED,
+    }.get(
+        processing_status, MedicalDocumentPage.ProcessingStatus.QUEUED
+    )
+    MedicalDocumentPage.objects.create(
+        document=document,
+        page_number=1,
+        processing_status=page_status,
+        document_date=document_date,
+        date_verified=date_verified,
+        date_source=date_source,
+    )
     return document
 
 

@@ -162,6 +162,9 @@ def confirm_document_date(*, document, actor, candidate_id=None, manual_date=Non
             new_values={"document_date": new_date.isoformat()},
             metadata={"date_source": source},
         )
+    from documents.page_services import sync_document_to_page_units
+
+    sync_document_to_page_units(locked)
     logger.info(
         "Document date decision persisted",
         extra={

@@ -417,3 +417,26 @@ def soft_delete_medical_document(*, document, actor):
             resource_uuid=locked.uuid,
         )
     return locked
+
+
+def purge_medical_document(*, document):
+    """Hard-delete a document and ALL its children (page units, extractions,
+    candidates, OCR text, events). Used by test/ops cleanup — not the normal
+    user lifecycle (which is soft-delete)."""
+    from documents.models import DocumentDateEvent, MedicalDocumentEvent
+    from labs.models import LabReportExtraction
+    from processing.models import DateCandidate
+
+    with transaction.atomic():
+        DateCandidate.objects.filter(document=document).delete()
+        DocumentDateEvent.objects.filter(document=document).delete()
+        MedicalDocumentEvent.objects.filter(document=document).delete()
+        LabReportExtraction.objects.filter(document=document).delete()
+        if hasattr(document, "document_text"):
+            document.document_text.delete()
+        document.pages.all().delete()
+        stored = document.stored_file
+        document.delete()
+        if stored:
+            stored.delete()
+    return None

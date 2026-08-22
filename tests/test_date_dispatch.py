@@ -40,17 +40,20 @@ def test_date_dispatch_occurs_only_after_commit(
     ).exists()
 
 
-def test_native_pdf_success_schedules_date_processing(tmp_path):
+def test_native_pdf_success_schedules_page_date_processing(tmp_path):
     document = queued_document(tmp_path)
 
-    with patch("processing.date_services.schedule_date_processing") as schedule_dates:
+    with patch(
+        "processing.date_services.schedule_page_date_processing"
+    ) as schedule_page_dates:
         outcome = process_pdf_document(
             str(document.uuid),
             extractor=extractor_returning(extracted_result()),
         )
 
     assert outcome == MedicalDocument.ProcessingStatus.TEXT_EXTRACTED
-    schedule_dates.assert_called_once()
+    # Two-page PDF -> one independent page date task per page.
+    assert schedule_page_dates.call_count == 2
 
 
 def test_pdf_requiring_ocr_does_not_schedule_dates_prematurely(tmp_path):
