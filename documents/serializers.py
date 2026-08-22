@@ -119,12 +119,36 @@ class MedicalDocumentSerializer(serializers.ModelSerializer):
 
 class MedicalDocumentDetailSerializer(MedicalDocumentSerializer):
     text_available = serializers.SerializerMethodField()
+    duplicate_of = serializers.SerializerMethodField()
 
     class Meta(MedicalDocumentSerializer.Meta):
-        fields = (*MedicalDocumentSerializer.Meta.fields, "text_available")
+        fields = (
+            *MedicalDocumentSerializer.Meta.fields,
+            "text_available",
+            "duplicate_of",
+        )
 
     def get_text_available(self, document) -> bool:
         return hasattr(document, "document_text")
+
+    def get_duplicate_of(self, document) -> str | None:
+        """Existing document uuid when this upload was flagged as a content
+        duplicate. Owner-scoped (the event records only same-patient matches);
+        never leaks other patients."""
+        from documents.models import MedicalDocumentEvent
+
+        if document.processing_status != MedicalDocument.ProcessingStatus.DUPLICATE_DETECTED:
+            return None
+        event = (
+            document.events.filter(
+                event_type=MedicalDocumentEvent.EventType.DUPLICATE_DETECTED
+            )
+            .order_by("-created_at")
+            .first()
+        )
+        if event is None:
+            return None
+        return (event.metadata or {}).get("existing_document_uuid")
 
 
 class PendingDateConfirmationCandidateSerializer(serializers.ModelSerializer):
