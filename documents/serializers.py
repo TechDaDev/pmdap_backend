@@ -253,7 +253,13 @@ class MedicalDocumentPageSummarySerializer(serializers.Serializer):
 
 
 class MedicalDocumentPageDetailSerializer(serializers.Serializer):
-    """One report page unit with its own date candidates + lab results."""
+    """One report page unit with its own date candidates + lab results.
+
+    ``detected_candidates`` / ``lab_results`` are pass-through dicts — the view
+    already serializes them with the canonical candidate/result serializers;
+    re-serializing pre-serialized dicts through a ModelSerializer with
+    ``source=`` fields silently drops keys (e.g. date/type).
+    """
 
     document_uuid = serializers.UUIDField()
     page_number = serializers.IntegerField()
@@ -265,7 +271,9 @@ class MedicalDocumentPageDetailSerializer(serializers.Serializer):
     date_verified = serializers.BooleanField()
     date_source = serializers.CharField()
     lab_result_count = serializers.IntegerField()
-    detected_candidates = DateCandidateSerializer(many=True)
+    detected_candidates = serializers.ListField(
+        child=serializers.DictField(), required=False
+    )
     lab_results = serializers.ListField(child=serializers.DictField(), required=False)
 
 
