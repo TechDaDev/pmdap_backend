@@ -47,6 +47,7 @@ class ArchiveQueryService:
             "healthcare_facility__country",
             "healthcare_facility__region",
             "healthcare_facility__city",
+            "stored_file",
         )
 
     def chronological_queryset(self, filters):
@@ -85,6 +86,7 @@ class ArchiveQueryService:
             "healthcare_facility__country",
             "healthcare_facility__region",
             "healthcare_facility__city",
+            "stored_file",
         )
         if document_type := filters.get("document_type"):
             queryset = queryset.filter(document_type=document_type)

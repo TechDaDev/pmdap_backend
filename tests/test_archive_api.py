@@ -404,3 +404,20 @@ def test_archive_list_has_no_n_plus_one(api_client):
     assert response.status_code == 200
     assert response.data["data"]["count"] == 9
     assert len(captured) <= 8
+
+
+def test_archive_item_exposes_stored_file_mime_type(api_client):
+    # M26: archive cards render a PDF/Image source tag from the ACTUAL stored
+    # file media type — the payload must carry file.mime_type, never inferred
+    # from document_type or page_count.
+    user, patient = patient_user()
+    verified_document(patient, user, date(2026, 1, 1))
+    authenticate(api_client, user)
+    response = api_client.get(ARCHIVE)
+    assert response.status_code == 200
+    results = response.data["data"]["results"]
+    assert len(results) == 1
+    item = results[0]
+    assert item["file"]["mime_type"] == "image/png"
+    assert item["file"]["page_count"] == 1
+    assert "original_filename" in item["file"]

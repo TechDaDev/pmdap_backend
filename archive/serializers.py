@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
 from documents.models import MedicalDocument
-from documents.serializers import RejectUnknownFieldsMixin
+from documents.serializers import RejectUnknownFieldsMixin, StoredFilePublicSerializer
 from facilities.models import HealthcareFacility
 
 
@@ -57,6 +57,7 @@ class ArchiveFilterSerializer(RejectUnknownFieldsMixin, serializers.Serializer):
 
 class ArchiveDocumentSerializer(serializers.ModelSerializer):
     healthcare_facility = ArchiveFacilitySummarySerializer(read_only=True)
+    file = StoredFilePublicSerializer(source="stored_file", read_only=True)
 
     class Meta:
         model = MedicalDocument
@@ -74,6 +75,7 @@ class ArchiveDocumentSerializer(serializers.ModelSerializer):
             "physician_name",
             "processing_status",
             "created_at",
+            "file",
         )
         read_only_fields = fields
 
