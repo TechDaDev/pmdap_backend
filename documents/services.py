@@ -428,8 +428,8 @@ def purge_medical_document(*, document):
     from processing.models import DateCandidate
 
     with transaction.atomic():
-        DateCandidate.objects.filter(document=document).delete()
         DocumentDateEvent.objects.filter(document=document).delete()
+        DateCandidate.objects.filter(document=document).delete()
         MedicalDocumentEvent.objects.filter(document=document).delete()
         LabReportExtraction.objects.filter(document=document).delete()
         if hasattr(document, "document_text"):
