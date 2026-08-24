@@ -376,6 +376,13 @@ def process_lab_extraction_for_page(
 
     try:
         spans = _page_spans(document, page.page_number)
+        # Scanned PDFs can carry a garbage embedded text layer that passes the
+        # usability check but yields NO OCR spans -> structured parsing needs
+        # geometry evidence. Run the page's first-pass OCR lazily (no-op when
+        # spans already exist); per-page isolated, never a second pass.
+        if not spans and hasattr(document, "document_text"):
+            _ensure_page_ocr(document, page.page_number)
+            spans = _page_spans(document, page.page_number)
         if classifier is None:
             classifier = detect_report_subtype
         source_page = (
@@ -422,6 +429,68 @@ def _page_spans(document, page_number):
         )
         for span in page.spans.order_by("sequence")
     ]
+
+
+def _ensure_page_ocr(document, page_number):
+    """First-pass OCR for ONE page that has native text but no spans.
+
+    Scanned PDFs often embed a garbage text layer that passes the char-count
+    usability check, so the normal OCR step is skipped and no spans exist.
+    Structured lab parsing requires span geometry, so OCR this page lazily.
+    No-op when the page already has spans (never a second OCR).
+    """
+    from processing.models import DocumentTextPage, DocumentTextSpan
+    from processing.ocr import PDFPageRenderer
+    from processing.ocr_services import _meaningful, _span_rows
+    from processing.ocr_provider import get_ocr_engine
+    from processing.services import _read_verified_content
+
+    if not hasattr(document, "document_text"):
+        return None
+    page = (
+        document.document_text.pages.filter(page_number=page_number).first()
+    )
+    if page is None or page.spans.exists() or page.ocr_completed:
+        return page
+    try:
+        content, _ = _read_verified_content(document.stored_file)
+        renderer = PDFPageRenderer()
+        engine = get_ocr_engine()
+        image = renderer.render(content, page_number)
+        try:
+            size = image.size
+            result = engine.extract_image(image)
+        finally:
+            image.close()
+        width, height = size
+        page.ocr_text = result.text
+        page.text = result.text
+        page.meaningful_character_count = _meaningful(result.text)
+        page.requires_ocr = False
+        page.ocr_completed = True
+        page.effective_source = DocumentTextPage.EffectiveSource.OCR
+        page.ocr_engine_name = result.engine_name
+        page.ocr_engine_version = result.engine_version
+        page.ocr_mean_confidence = result.mean_confidence
+        page.ocr_minimum_confidence = result.minimum_confidence
+        page.ocr_duration_ms = result.duration_ms
+        page.preprocessing_version = result.preprocessing_version
+        page.save()
+        if width and height:
+            DocumentTextSpan.objects.filter(document_text_page=page).delete()
+            DocumentTextSpan.objects.bulk_create(
+                _span_rows(page, width, height, result.lines),
+                ignore_conflicts=True,
+            )
+    except Exception:  # noqa: BLE001 - OCR failure isolates to this page
+        logger.warning(
+            "Page OCR (lazy) failed",
+            extra={
+                "document_uuid": str(document.uuid),
+                "page_number": page_number,
+            },
+        )
+    return page
 
 
 def _persist_page(page, parsed_rows, *, elapsed_ms):

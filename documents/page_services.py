@@ -41,12 +41,42 @@ PAGE_ALLOWED_DATE_DECISION_STATES = {
     MedicalDocumentPage.ProcessingStatus.READY,
 }
 
+# Strong specialized cues win over generic chemistry: a shared "chemistry"
+# header must NOT dominate a CBC or hormones page. Chemistry requires explicit
+# analyte words, not the bare word "chemistry".
 SUBTYPE_CUES = (
-    # Order matters: first strong match wins.
-    (MedicalDocumentPage.ReportSubtype.LAB_CHEMISTRY, ("biochem", "chemistry", "chemical", "lipid profile", "lipid")),
-    (MedicalDocumentPage.ReportSubtype.LAB_HORMONES, ("hormone", "vitamin d", "vitamin b", "vitamin", "thyroid", "t3", "t4", "tsh", "prolactin", "estradiol", "testosterone", "cortisol")),
-    (MedicalDocumentPage.ReportSubtype.LAB_CBC, ("cbc", "complete blood", "hematolog", "haematolog", "blood count", "wbc", "rbc", "hemoglobin", "platelet", "packed cell")),
-    (MedicalDocumentPage.ReportSubtype.RADIOLOGY, ("radiology", "x-ray", "xray", "x ray", "ct scan", "mri", "ultrasound", "sonograph", "echocardiograph", "mammograph")),
+    (
+        MedicalDocumentPage.ReportSubtype.LAB_CBC,
+        (
+            "cbc", "complete blood", "hematolog", "haematolog", "blood count",
+            "wbc", "rbc", "hgb", "hct", "mcv", "mch", "mchc", "plt", "platelet",
+            "packed cell",
+        ),
+    ),
+    (
+        MedicalDocumentPage.ReportSubtype.LAB_HORMONES,
+        (
+            "hormone", "vitamin d", "vitamin b", "vitamin", "thyroid", "tsh",
+            "t3", "t4", "prolactin", "estradiol", "testosterone", "cortisol",
+            "fsh", "lh",
+        ),
+    ),
+    (
+        MedicalDocumentPage.ReportSubtype.RADIOLOGY,
+        (
+            "radiology", "x-ray", "xray", "x ray", "ct scan", "mri",
+            "ultrasound", "sonograph", "echocardiograph", "mammograph",
+        ),
+    ),
+    (
+        MedicalDocumentPage.ReportSubtype.LAB_CHEMISTRY,
+        (
+            "biochem", "lipid profile", "cholesterol", "triglyceride", "hdl",
+            "ldl", "glucose", "creatinine", "urea", "bilirubin", "uric acid",
+            "sgpt", "sgot", "gpt", "got", "alkaline phosphatase", "albumin",
+            "total protein",
+        ),
+    ),
 )
 
 

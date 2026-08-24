@@ -224,7 +224,7 @@ OCR_TASK_SOFT_TIME_LIMIT = int(os.getenv("OCR_TASK_SOFT_TIME_LIMIT", str(25 * 60
 OCR_TASK_TIME_LIMIT = int(os.getenv("OCR_TASK_TIME_LIMIT", str(30 * 60)))
 
 # Structured lab extraction (geometry-backed, consumes persisted OCR spans).
-LAB_PIPELINE_VERSION = os.getenv("LAB_PIPELINE_VERSION", "lab-v2")
+LAB_PIPELINE_VERSION = os.getenv("LAB_PIPELINE_VERSION", "lab-v3")
 LAB_TASK_SOFT_TIME_LIMIT = int(os.getenv("LAB_TASK_SOFT_TIME_LIMIT", str(5 * 60)))
 LAB_TASK_TIME_LIMIT = int(os.getenv("LAB_TASK_TIME_LIMIT", str(10 * 60)))
 
