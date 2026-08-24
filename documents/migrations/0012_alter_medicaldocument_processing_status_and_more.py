@@ -7,12 +7,11 @@ from django.db import migrations, models
 
 def backfill_page_units(apps, schema_editor):
     """Create one MedicalDocumentPage per existing DocumentTextPage (page 1
-    fallback for docs with no canonical text), and re-point unambiguous
-    page-scoped DateCandidate/LabReportExtraction rows at their unit."""
+    fallback for docs with no canonical text). FK re-pointing of existing
+    DateCandidate/LabReportExtraction rows happens in 0013 AFTER the page_unit
+    fields exist (their migrations depend on this one)."""
     MedicalDocument = apps.get_model("documents", "MedicalDocument")
     MedicalDocumentPage = apps.get_model("documents", "MedicalDocumentPage")
-    DateCandidate = apps.get_model("processing", "DateCandidate")
-    LabReportExtraction = apps.get_model("labs", "LabReportExtraction")
     DocumentTextPage = apps.get_model("processing", "DocumentTextPage")
 
     def page_status(doc_status, page):
@@ -52,27 +51,6 @@ def backfill_page_units(apps, schema_editor):
                 defaults={"processing_status": page_status(doc.processing_status, None)},
             )
             created += 1
-
-    for candidate in DateCandidate.objects.all().iterator():
-        unit = MedicalDocumentPage.objects.filter(
-            document_id=candidate.document_id,
-            page_number=candidate.page_number,
-        ).first()
-        if unit is not None:
-            DateCandidate.objects.filter(pk=candidate.pk).update(page_unit_id=unit.pk)
-
-    for extraction in LabReportExtraction.objects.all().iterator():
-        page_count = MedicalDocumentPage.objects.filter(
-            document_id=extraction.document_id
-        ).count()
-        if page_count == 1:
-            unit = MedicalDocumentPage.objects.filter(
-                document_id=extraction.document_id
-            ).first()
-            if unit is not None:
-                LabReportExtraction.objects.filter(pk=extraction.pk).update(
-                    page_unit_id=unit.pk
-                )
 
 
 class Migration(migrations.Migration):
