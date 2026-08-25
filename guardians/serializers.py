@@ -15,7 +15,14 @@ from patients.models import PatientProfile
 
 
 class MinorCreateSerializer(RejectUnknownFieldsMixin, serializers.Serializer):
-    full_name = serializers.CharField(max_length=255)
+    full_name = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    name = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    father_name = serializers.CharField(
+        max_length=255, required=False, allow_blank=True
+    )
+    grandfather_name = serializers.CharField(
+        max_length=255, required=False, allow_blank=True
+    )
     date_of_birth = serializers.DateField()
     sex = serializers.ChoiceField(choices=PatientProfile.Sex.choices)
     nationality = serializers.CharField(min_length=2, max_length=2)
@@ -30,15 +37,18 @@ class MinorCreateSerializer(RejectUnknownFieldsMixin, serializers.Serializer):
     document_type = serializers.ChoiceField(
         choices=IdentityDocument.DocumentType.choices
     )
-    document_number = serializers.CharField(max_length=128)
+    document_number = serializers.CharField(
+        max_length=128, required=False, allow_blank=True
+    )
     national_number = serializers.CharField(
         max_length=128, required=False, allow_blank=True, default=""
     )
     issuing_country = serializers.RegexField(r"^[A-Za-z]{2}$", required=False)
     issue_date = serializers.DateField(required=False, allow_null=True)
     expiry_date = serializers.DateField(required=False, allow_null=True)
-    front_image = serializers.FileField()
+    front_image = serializers.FileField(required=False, allow_null=True)
     back_image = serializers.FileField(required=False, allow_null=True)
+    extraction_job_id = serializers.UUIDField(required=False, allow_null=True)
     evidence_type = serializers.ChoiceField(
         choices=GuardianEvidence.EvidenceType.choices, required=False
     )
@@ -52,6 +62,44 @@ class MinorCreateSerializer(RejectUnknownFieldsMixin, serializers.Serializer):
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
+        extraction_job_id = attrs.get("extraction_job_id")
+        if extraction_job_id:
+            if (
+                attrs["document_type"]
+                != IdentityDocument.DocumentType.UNIFIED_NATIONAL_CARD
+            ):
+                raise serializers.ValidationError(
+                    {
+                        "extraction_job_id": [
+                            "Child extraction jobs require a National Card."
+                        ]
+                    }
+                )
+            if attrs.get("front_image") or attrs.get("back_image"):
+                raise serializers.ValidationError(
+                    {
+                        "extraction_job_id": [
+                            "Use either extraction_job_id or image files, not both."
+                        ]
+                    }
+                )
+            missing_names = [
+                field
+                for field in ("name", "father_name", "grandfather_name")
+                if not attrs.get(field)
+            ]
+            if missing_names:
+                raise serializers.ValidationError(
+                    {field: ["This field is required."] for field in missing_names}
+                )
+            attrs["full_name"] = " ".join(
+                attrs[field].strip()
+                for field in ("name", "father_name", "grandfather_name")
+            )
+        elif not attrs.get("full_name"):
+            raise serializers.ValidationError(
+                {"full_name": ["This field is required."]}
+            )
         value = attrs["date_of_birth"]
         today = timezone.localdate()
         age = (
@@ -79,21 +127,28 @@ class MinorCreateSerializer(RejectUnknownFieldsMixin, serializers.Serializer):
                 {"evidence_file": ["Evidence type and file must be supplied together."]}
             )
 
-        document_fields = {
-            "document_type",
-            "document_number",
-            "national_number",
-            "issuing_country",
-            "issue_date",
-            "expiry_date",
-            "front_image",
-            "back_image",
-        }
-        document = IdentityDocumentInputSerializer(
-            data={key: attrs[key] for key in document_fields if key in attrs},
-            context={"minor_creation": True},
-        )
-        document.is_valid(raise_exception=True)
+        if extraction_job_id:
+            identity_data = {
+                "document_type": attrs["document_type"],
+                "extraction_job_id": extraction_job_id,
+            }
+        else:
+            document_fields = {
+                "document_type",
+                "document_number",
+                "national_number",
+                "issuing_country",
+                "issue_date",
+                "expiry_date",
+                "front_image",
+                "back_image",
+            }
+            document = IdentityDocumentInputSerializer(
+                data={key: attrs[key] for key in document_fields if key in attrs},
+                context={"minor_creation": True},
+            )
+            document.is_valid(raise_exception=True)
+            identity_data = dict(document.validated_data)
         if evidence := attrs.get("evidence_file"):
             IdentityDocumentInputSerializer()._validate_image(evidence)
         return {
@@ -101,14 +156,17 @@ class MinorCreateSerializer(RejectUnknownFieldsMixin, serializers.Serializer):
                 key: attrs[key]
                 for key in (
                     "full_name",
+                    "father_name",
+                    "grandfather_name",
                     "date_of_birth",
                     "sex",
                     "nationality",
                     "blood_group",
                 )
+                if key in attrs
             },
             "relationship": attrs["relationship"],
-            "identity_data": dict(document.validated_data),
+            "identity_data": identity_data,
             "evidence_type": attrs.get("evidence_type"),
             "evidence_file": attrs.get("evidence_file"),
         }

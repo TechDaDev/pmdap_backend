@@ -351,7 +351,13 @@ def _read_staged_validated(job, key, name):
 
 
 def finalize_identity_document(
-    *, patient, actor, validated_data, job, replaces=None
+    *,
+    patient,
+    actor,
+    validated_data,
+    job,
+    replaces=None,
+    defer_cleanup=False,
 ):
     """Finalize a successful extraction job into a real IdentityDocument.
 
@@ -362,9 +368,10 @@ def finalize_identity_document(
     Ownership: only the job owner (request.user == job.user) can finalize.
     A different user receives a 404 (existence is not revealed).
 
-    Post-commit, staging objects + cached result + the consumed job row are
-    removed. On failure the promoted permanent objects are rolled back and
-    staging is preserved so the client can retry.
+    Staging objects + cached result + the consumed job row are removed after
+    finalization. Callers that wrap this service in a larger transaction may
+    defer cleanup until that outer transaction commits, preserving staging on
+    rollback.
     """
     validated_data = {
         key: value
@@ -397,9 +404,7 @@ def finalize_identity_document(
 
         front_validated = _read_staged_validated(job, job.front_key, "front")
         back_validated = (
-            _read_staged_validated(job, job.back_key, "back")
-            if job.back_key
-            else None
+            _read_staged_validated(job, job.back_key, "back") if job.back_key else None
         )
         document = _create_document(
             patient=patient,
@@ -413,7 +418,10 @@ def finalize_identity_document(
         job.status = IdentityExtractionJob.Status.FINALIZED
         job.save(update_fields=["status", "updated_at"])
     # Committed: remove staging + cached result + consumed job row.
-    _finalize_job_cleanup(job)
+    if defer_cleanup:
+        transaction.on_commit(lambda: _finalize_job_cleanup(job))
+    else:
+        _finalize_job_cleanup(job)
     return document
 
 

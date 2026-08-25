@@ -22,10 +22,14 @@ from guardians.models import (
     GuardianRelationshipEvent,
     MinorCreationRequest,
 )
-from identities.models import IdentityDocument
+from identities.exceptions import IdentityExtractionJobNotFound
+from identities.extraction_store import read_extraction_result
+from identities.models import IdentityDocument, IdentityExtractionJob
 from identities.permissions import can_verify_identity
+from identities.serializers import IdentityDocumentInputSerializer
 from identities.services import (
     delete_identity_file_from_storage,
+    finalize_identity_document,
     inspect_identity_upload,
     persist_identity_upload,
     submit_identity_document,
@@ -158,7 +162,9 @@ def _request_fingerprint(validated_data):
             for key, value in identity.items()
             if key not in {"front_image", "back_image"}
         },
-        "front_sha256": inspect_identity_upload(identity["front_image"]).sha256,
+        "front_sha256": inspect_identity_upload(identity["front_image"]).sha256
+        if identity.get("front_image")
+        else None,
         "back_sha256": inspect_identity_upload(identity["back_image"]).sha256
         if identity.get("back_image")
         else None,
@@ -179,6 +185,48 @@ def _request_fingerprint(validated_data):
         payload, sort_keys=True, separators=(",", ":"), default=default
     )
     return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def _extracted_value(payload, field):
+    value = (payload.get("fields", {}).get(field) or {}).get("value")
+    return str(value).strip() if value is not None else ""
+
+
+def _authoritative_extraction_identity(job):
+    payload = read_extraction_result(job.uuid)
+    if payload is None:
+        raise IdentityExtractionJobNotFound()
+    national_number = _extracted_value(payload, "national_card_number")
+    family_number = _extracted_value(payload, "family_number")
+    card_body_number = _extracted_value(payload, "unique_card_body_number")
+    missing = {
+        field: ["Authoritative extraction did not produce this field."]
+        for field, value in (
+            ("national_number", national_number),
+            ("family_number", family_number),
+            ("unique_card_body_number", card_body_number),
+        )
+        if not value
+    }
+    if missing:
+        from rest_framework import serializers
+
+        raise serializers.ValidationError(missing)
+    serializer = IdentityDocumentInputSerializer(
+        data={
+            "document_type": IdentityDocument.DocumentType.UNIFIED_NATIONAL_CARD,
+            "document_number": national_number,
+            "national_number": national_number,
+            "family_number": family_number,
+            "unique_card_body_number": card_body_number,
+            "issuing_country": "IQ",
+            "extraction_job_id": str(job.uuid),
+        }
+    )
+    serializer.is_valid(raise_exception=True)
+    identity_data = dict(serializer.validated_data)
+    identity_data.pop("extraction_job_id", None)
+    return identity_data
 
 
 def create_minor(*, guardian, idempotency_key, validated_data):
@@ -202,12 +250,33 @@ def create_minor(*, guardian, idempotency_key, validated_data):
                     creation.minor_patient, creation.relationship, False
                 )
 
+            extraction_job_id = validated_data["identity_data"].get("extraction_job_id")
+            extraction_job = None
+            identity_data = dict(validated_data["identity_data"])
+            if extraction_job_id:
+                try:
+                    extraction_job = IdentityExtractionJob.objects.get(
+                        uuid=extraction_job_id, user=guardian
+                    )
+                except IdentityExtractionJob.DoesNotExist:
+                    raise IdentityExtractionJobNotFound() from None
+                identity_data = _authoritative_extraction_identity(extraction_job)
+
             minor = create_patient_profile(user=None, **validated_data["profile_data"])
-            document = submit_identity_document(
-                patient=minor,
-                actor=guardian,
-                validated_data=dict(validated_data["identity_data"]),
-            )
+            if extraction_job is not None:
+                document = finalize_identity_document(
+                    patient=minor,
+                    actor=guardian,
+                    validated_data=identity_data,
+                    job=extraction_job,
+                    defer_cleanup=True,
+                )
+            else:
+                document = submit_identity_document(
+                    patient=minor,
+                    actor=guardian,
+                    validated_data=identity_data,
+                )
             minor.refresh_from_db()
             stored_files.extend([document.front_image, document.back_image])
             relationship = GuardianRelationship.objects.create(
