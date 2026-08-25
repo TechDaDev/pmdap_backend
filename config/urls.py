@@ -21,6 +21,10 @@ urlpatterns = [
     path("api/v1/identity-documents/", include("identities.urls")),
     path("api/v1/minors/", include("guardians.urls")),
     path(
+        "api/v1/guardian-relationships/",
+        include("guardians.patient_urls"),
+    ),
+    path(
         "api/v1/verification/identity-documents/",
         include("identities.verification_urls"),
     ),

@@ -16,6 +16,7 @@ from guardians.models import GuardianEvidence, GuardianRelationship
 from guardians.serializers import (
     EmptySerializer,
     GuardianRelationshipFilterSerializer,
+    GuardianRelationshipPatientSerializer,
     GuardianRelationshipSerializer,
     GuardianRelationshipVerificationSerializer,
     MinorCreateResponseSerializer,
@@ -99,6 +100,56 @@ def authorized_minor_relationship(user, minor_uuid):
     if relationship is None:
         raise GuardianRelationshipNotFound()
     return relationship
+
+
+def patient_relationship(user, relationship_uuid):
+    try:
+        return GuardianRelationship.objects.select_related("minor_patient").get(
+            uuid=relationship_uuid, guardian_user=user
+        )
+    except (GuardianRelationship.DoesNotExist, ValueError) as exc:
+        raise GuardianRelationshipNotFound() from exc
+
+
+class GuardianRelationshipPatientCollectionView(APIView):
+    @extend_schema(
+        operation_id="guardian_relationship_list",
+        responses={
+            200: paginated_envelope(
+                "GuardianRelationshipList",
+                GuardianRelationshipPatientSerializer(many=True),
+            ),
+            401: ErrorEnvelopeSerializer,
+        },
+        tags=["Minors and guardians"],
+    )
+    def get(self, request):
+        relationships = GuardianRelationship.objects.filter(
+            guardian_user=request.user
+        ).select_related("minor_patient")
+        return page_response(
+            request, relationships, GuardianRelationshipPatientSerializer
+        )
+
+
+class GuardianRelationshipPatientDetailView(APIView):
+    @extend_schema(
+        operation_id="guardian_relationship_retrieve",
+        responses={
+            200: envelope(
+                "GuardianRelationshipDetail",
+                GuardianRelationshipPatientSerializer(read_only=True),
+            ),
+            401: ErrorEnvelopeSerializer,
+            404: ErrorEnvelopeSerializer,
+        },
+        tags=["Minors and guardians"],
+    )
+    def get(self, request, relationship_uuid):
+        relationship = patient_relationship(request.user, relationship_uuid)
+        return Response(
+            {"data": GuardianRelationshipPatientSerializer(relationship).data}
+        )
 
 
 class MinorCollectionView(APIView):

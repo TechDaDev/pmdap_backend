@@ -175,6 +175,111 @@ def assert_error(response, status_code, code=None):
 
 
 @pytest.mark.django_db
+def test_patient_relationship_list_returns_all_states_without_sensitive_fields(
+    api_client,
+):
+    guardian, _, _ = create_verified_guardian()
+    statuses = ["PENDING", "VERIFIED", "REJECTED", "REVOKED"]
+    relationships = []
+    for index, expected_status in enumerate(statuses):
+        response = create_minor(
+            api_client,
+            guardian,
+            birth_document_payload(document_number=f"BIRTH-SAFE-{index}"),
+            key=f"safe-list-{index}",
+        )
+        assert response.status_code == 201
+        relationship = relationship_model().objects.latest("created_at")
+        if expected_status == "VERIFIED":
+            relationship.verification_status = "VERIFIED"
+            relationship.active = True
+            relationship.verified_at = relationship.created_at
+            relationship.save(
+                update_fields=("verification_status", "active", "verified_at")
+            )
+        elif expected_status == "REJECTED":
+            relationship.verification_status = "REJECTED"
+            relationship.rejection_reason = "internal reviewer note"
+            relationship.save(update_fields=("verification_status", "rejection_reason"))
+        elif expected_status == "REVOKED":
+            relationship.verification_status = "VERIFIED"
+            relationship.active = False
+            relationship.ended_at = relationship.created_at
+            relationship.ended_reason = "REVOKED"
+            relationship.ended_reason_detail = "private operator detail"
+            relationship.save(
+                update_fields=(
+                    "verification_status",
+                    "active",
+                    "ended_at",
+                    "ended_reason",
+                    "ended_reason_detail",
+                )
+            )
+        relationships.append(relationship)
+
+    auth(api_client, guardian)
+    response = api_client.get("/api/v1/guardian-relationships/")
+
+    assert response.status_code == 200
+    results = response.json()["data"]["results"]
+    assert {item["status"] for item in results} == set(statuses)
+    assert all(
+        set(item)
+        == {
+            "uuid",
+            "minor_patient",
+            "relationship",
+            "status",
+            "can_revoke",
+            "started_at",
+            "verified_at",
+            "ended_at",
+            "created_at",
+            "updated_at",
+        }
+        for item in results
+    )
+    assert all(
+        set(item["minor_patient"]) == {"uuid", "digital_id", "full_name"}
+        for item in results
+    )
+    serialized = str(response.json()).lower()
+    for forbidden in (
+        "date_of_birth",
+        "family",
+        "document_number",
+        "national_number",
+        "evidence",
+        "rejection_reason",
+        "ended_reason_detail",
+        "internal reviewer note",
+        "private operator detail",
+    ):
+        assert forbidden not in serialized
+
+
+@pytest.mark.django_db
+def test_patient_relationship_detail_is_owner_scoped(api_client):
+    owner, _, _ = create_verified_guardian(email="owner-safe@example.com")
+    stranger, _, _ = create_verified_guardian(
+        email="stranger-safe@example.com", family="FAM-200"
+    )
+    created = create_minor(api_client, owner, key="owner-safe-detail")
+    relationship_uuid = created.json()["data"]["relationship"]["uuid"]
+
+    auth(api_client, stranger)
+    response = api_client.get(f"/api/v1/guardian-relationships/{relationship_uuid}/")
+    assert_error(response, 404, "not_found")
+
+    auth(api_client, owner)
+    response = api_client.get(f"/api/v1/guardian-relationships/{relationship_uuid}/")
+    assert response.status_code == 200
+    assert response.json()["data"]["uuid"] == relationship_uuid
+    assert response.json()["data"]["status"] == "PENDING"
+
+
+@pytest.mark.django_db
 def test_verified_adult_patient_creates_independent_minor(api_client):
     guardian, guardian_profile, _ = create_verified_guardian()
 

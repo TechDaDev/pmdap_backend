@@ -136,6 +136,63 @@ class GuardianRelationshipSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class GuardianRelationshipChildSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PatientProfile
+        fields = ("uuid", "digital_id", "full_name")
+        read_only_fields = fields
+
+
+class GuardianRelationshipPatientSerializer(serializers.ModelSerializer):
+    minor_patient = GuardianRelationshipChildSerializer(read_only=True)
+    status = serializers.SerializerMethodField()
+    can_revoke = serializers.SerializerMethodField()
+
+    class Meta:
+        model = GuardianRelationship
+        fields = (
+            "uuid",
+            "minor_patient",
+            "relationship",
+            "status",
+            "can_revoke",
+            "started_at",
+            "verified_at",
+            "ended_at",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = fields
+
+    @extend_schema_field(
+        serializers.ChoiceField(
+            choices=("PENDING", "VERIFIED", "REJECTED", "REVOKED", "UNKNOWN")
+        )
+    )
+    def get_status(self, obj):
+        if obj.ended_at is not None:
+            return "REVOKED"
+        if obj.verification_status == GuardianRelationship.VerificationStatus.REJECTED:
+            return "REJECTED"
+        if (
+            obj.verification_status == GuardianRelationship.VerificationStatus.VERIFIED
+            and obj.active
+        ):
+            return "VERIFIED"
+        if obj.verification_status == GuardianRelationship.VerificationStatus.PENDING:
+            return "PENDING"
+        return "UNKNOWN"
+
+    @extend_schema_field(serializers.BooleanField())
+    def get_can_revoke(self, obj):
+        return (
+            obj.ended_at is None
+            and obj.active
+            and obj.verification_status
+            == GuardianRelationship.VerificationStatus.VERIFIED
+        )
+
+
 class MinorSerializer(serializers.ModelSerializer):
     age = serializers.IntegerField(read_only=True)
     is_minor = serializers.BooleanField(read_only=True)
