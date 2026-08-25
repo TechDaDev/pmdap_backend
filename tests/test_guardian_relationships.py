@@ -20,17 +20,36 @@ from tests.test_minors_guardians import (
 
 
 def approve_minor_document(minor, agent):
-    from identities.services import approve_identity_document
+    from identities.services import approve_identity_document, submit_identity_document
 
     document = document_model().objects.get(patient=minor)
+    if document.document_type == "UNIFIED_NATIONAL_CARD":
+        document.family_number = "FAM-100"
+        document.save(update_fields=("family_number", "updated_at"))
     approve_identity_document(document=document, agent=agent)
+    if document.document_type != "UNIFIED_NATIONAL_CARD":
+        guardian = relationship_model().objects.get(minor_patient=minor).guardian_user
+        card = submit_identity_document(
+            patient=minor,
+            actor=guardian,
+            validated_data={
+                "document_type": "UNIFIED_NATIONAL_CARD",
+                "document_number": f"CARD-{minor.uuid}",
+                "national_number": f"NAT-{minor.uuid}",
+                "family_number": "FAM-100",
+                "issuing_country": "IQ",
+                "front_image": image_upload("minor-card-front.png"),
+                "back_image": image_upload("minor-card-back.png"),
+            },
+        )
+        approve_identity_document(document=card, agent=agent)
     minor.refresh_from_db()
     return document
 
 
 def create_approved_minor(api_client, *, payload=None):
     guardian, guardian_profile, agent = create_verified_guardian()
-    create_minor(api_client, guardian, payload=payload)
+    create_minor(api_client, guardian, payload=payload or national_card_payload())
     minor = patient_model().objects.exclude(pk=guardian_profile.pk).get()
     approve_minor_document(minor, agent)
     relationship = relationship_model().objects.get(minor_patient=minor)

@@ -6,6 +6,7 @@ from guardians.api import (
     GuardianVerificationCollectionView,
     GuardianVerificationDetailView,
     GuardianVerificationRejectView,
+    GuardianVerificationRevokeView,
 )
 
 urlpatterns = [
@@ -28,6 +29,11 @@ urlpatterns = [
         "<uuid:relationship_uuid>/reject/",
         GuardianVerificationRejectView.as_view(),
         name="guardian-verification-reject",
+    ),
+    path(
+        "<uuid:relationship_uuid>/revoke/",
+        GuardianVerificationRevokeView.as_view(),
+        name="guardian-verification-revoke",
     ),
     path(
         "<uuid:relationship_uuid>/evidence/<uuid:evidence_uuid>/file/",

@@ -155,9 +155,11 @@ def legal_guardian_payload(**overrides):
 
 def create_minor(api_client, guardian, payload=None, key="minor-create-1"):
     auth(api_client, guardian)
+    payload = dict(payload or birth_document_payload())
+    payload.pop("family_number", None)
     return api_client.post(
         MINORS,
-        payload or birth_document_payload(),
+        payload,
         format="multipart",
         HTTP_IDEMPOTENCY_KEY=key,
     )
@@ -433,45 +435,17 @@ def test_legal_guardian_evidence_uses_private_identity_file(api_client):
 
 
 @pytest.mark.django_db
-@pytest.mark.parametrize(
-    ("child_family", "expected"),
-    [
-        ("FAM-100", "MATCH"),
-        ("FAM-999", "MISMATCH"),
-        ("", "UNAVAILABLE"),
-    ],
-)
-def test_family_number_is_only_a_relationship_signal(
-    api_client, child_family, expected
-):
+def test_client_family_number_is_rejected_for_minor_creation(api_client):
     guardian, guardian_profile, _ = create_verified_guardian(family="FAM-100")
-    guardian_uuid = guardian_profile.uuid
-    guardian_digital_id = guardian_profile.digital_id
-
-    response = create_minor(
-        api_client,
-        guardian,
-        national_card_payload(family_number=child_family),
-        key=f"family-{expected}",
+    auth(api_client, guardian)
+    response = api_client.post(
+        MINORS,
+        national_card_payload(family_number="FAM-100"),
+        format="multipart",
+        HTTP_IDEMPOTENCY_KEY="client-family-rejected",
     )
-
-    assert response.status_code == 201
-    relationship = relationship_model().objects.get()
-    guardian_profile.refresh_from_db()
-    assert relationship.family_number_result == expected
-    assert relationship.verification_status == "PENDING"
-    assert guardian_profile.uuid == guardian_uuid
-    assert guardian_profile.digital_id == guardian_digital_id
-    expected_event = {
-        "MATCH": "FAMILY_NUMBER_MATCHED",
-        "MISMATCH": "FAMILY_NUMBER_MISMATCHED",
-    }.get(expected)
-    if expected_event:
-        assert (
-            relationship_event_model()
-            .objects.filter(relationship=relationship, event_type=expected_event)
-            .exists()
-        )
+    assert response.status_code == 400
+    assert patient_model().objects.exclude(pk=guardian_profile.pk).count() == 0
 
 
 @pytest.mark.django_db

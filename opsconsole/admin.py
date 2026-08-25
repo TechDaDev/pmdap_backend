@@ -15,14 +15,12 @@ The replacement must happen before every other app's ``admin.py`` is imported
 during autodiscovery, so this app is listed first in ``PROJECT_APPS``.
 """
 
-import time
-
-from django.contrib.admin import AdminSite, sites as admin_sites
-from django.urls import path
 import django.contrib.admin as admin_mod
+from django.contrib.admin import AdminSite
+from django.contrib.admin import sites as admin_sites
+from django.urls import path
 
-from opsconsole import monitor_views
-from opsconsole import verification_views
+from opsconsole import guardian_views, monitor_views, verification_views
 
 
 class OpsAdminSite(AdminSite):
@@ -34,6 +32,26 @@ class OpsAdminSite(AdminSite):
     def get_urls(self):
         urls = super().get_urls()
         custom = [
+            path(
+                "guardian-verification/",
+                self.admin_view(guardian_views.guardian_queue),
+                name="ops_guardian_queue",
+            ),
+            path(
+                "guardian-verification/<uuid:relationship_uuid>/",
+                self.admin_view(guardian_views.guardian_review),
+                name="ops_guardian_review",
+            ),
+            path(
+                "guardian-verification/<uuid:relationship_uuid>/approve/",
+                self.admin_view(guardian_views.guardian_approve),
+                name="ops_guardian_approve",
+            ),
+            path(
+                "guardian-verification/<uuid:relationship_uuid>/reject/",
+                self.admin_view(guardian_views.guardian_reject),
+                name="ops_guardian_reject",
+            ),
             path(
                 "identity-verification/",
                 self.admin_view(verification_views.verification_queue),
@@ -79,6 +97,7 @@ class OpsAdminSite(AdminSite):
 
     def index(self, request, extra_context=None):
         """Add operations-console cards to the admin dashboard."""
+        from guardians.models import GuardianRelationship
         from identities.models import IdentityDocument
         from identities.permissions import can_verify_identity
 
@@ -87,6 +106,11 @@ class OpsAdminSite(AdminSite):
                 verification_status=IdentityDocument.VerificationStatus.PENDING,
                 status=IdentityDocument.LifecycleStatus.CURRENT,
             ).count(),
+            "ops_guardian_pending_count": GuardianRelationship.objects.filter(
+                verification_status=GuardianRelationship.VerificationStatus.PENDING,
+                ended_at__isnull=True,
+            ).count(),
+            "ops_guardian_url": "admin:ops_guardian_queue",
             "ops_monitor_url": "admin:ops_server_monitor",
             "ops_verification_url": "admin:ops_verification_queue",
             "ops_can_verify": can_verify_identity(request.user),
@@ -109,9 +133,7 @@ def _server_snapshot():
         status = buffer.get_collector_status()
         if not status:
             return None
-        services = [
-            name for name in (status.get("services") or "").split(",") if name
-        ]
+        services = [name for name in (status.get("services") or "").split(",") if name]
         state = status.get("status") or "STALE"
         return {
             "stale": state != "OK",

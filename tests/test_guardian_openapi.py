@@ -1,12 +1,14 @@
 M4_PATHS = {
     "/api/v1/minors/": {"get", "post"},
     "/api/v1/minors/{minor_uuid}/": {"get"},
+    "/api/v1/minors/relationships/{relationship_uuid}/revoke/": {"post"},
     "/api/v1/verification/guardian-relationships/": {"get"},
     "/api/v1/verification/guardian-relationships/{relationship_uuid}/": {"get"},
     "/api/v1/verification/guardian-relationships/{relationship_uuid}/approve/": {
         "post"
     },
     "/api/v1/verification/guardian-relationships/{relationship_uuid}/reject/": {"post"},
+    "/api/v1/verification/guardian-relationships/{relationship_uuid}/revoke/": {"post"},
     "/api/v1/verification/guardian-relationships/"
     "{relationship_uuid}/evidence/{evidence_uuid}/file/": {"get"},
 }
@@ -40,6 +42,7 @@ def test_minor_create_schema_is_multipart_and_protects_authority_fields(api_clie
     assert operation["parameters"][0]["required"] is True
     assert request_schema["properties"]["front_image"]["format"] == "binary"
     assert request_schema["properties"]["evidence_file"]["format"] == "binary"
+    assert "family_number" not in request_schema["properties"]
     assert {
         "user",
         "digital_id",
@@ -68,6 +71,7 @@ def test_relationship_decisions_document_actual_contracts(api_client):
     base = "/api/v1/verification/guardian-relationships/{relationship_uuid}"
     approve = schema["paths"][f"{base}/approve/"]["post"]
     reject = schema["paths"][f"{base}/reject/"]["post"]
+    revoke = schema["paths"][f"{base}/revoke/"]["post"]
 
     assert "requestBody" not in approve
     rejection = resolve_schema(
@@ -76,4 +80,9 @@ def test_relationship_decisions_document_actual_contracts(api_client):
     )
     assert set(rejection["properties"]) == {"rejection_reason"}
     assert rejection["required"] == ["rejection_reason"]
+    revocation = resolve_schema(
+        schema,
+        revoke["requestBody"]["content"]["application/json"]["schema"],
+    )
+    assert set(revocation["properties"]) == {"reason"}
     assert {"200", "400", "401", "403", "404", "409"}.issubset(approve["responses"])

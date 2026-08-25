@@ -26,6 +26,10 @@
   <div class="module ops-dashboard">
     <div class="ops-cards">
       <div class="ops-card ops-dashboard-card">
+        <div class="ops-card-title"><span class="ops-card-icon">👪</span><div><h2>Guardian verification</h2><p class="ops-card-sub">{{ ops_guardian_pending_count }} pending relationship{{ ops_guardian_pending_count|pluralize }}</p></div></div>
+        <a class="ops-cta" href="{% url ops_guardian_url %}">Open guardian queue</a>
+      </div>
+      <div class="ops-card ops-dashboard-card">
         <div class="ops-card-title">
           <span class="ops-card-icon">🪪</span>
           <div>

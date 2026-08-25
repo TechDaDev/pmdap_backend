@@ -10,6 +10,7 @@ from tests.test_minors_guardians import (
     create_verified_guardian,
     document_model,
     image_upload,
+    national_card_payload,
     patient_model,
     relationship_model,
 )
@@ -112,7 +113,9 @@ def test_concurrent_duplicate_guardian_approvals_are_consistent():
     from identities.services import approve_identity_document
 
     guardian, guardian_profile, agent = create_verified_guardian()
-    serializer = MinorCreateSerializer(data=birth_document_payload())
+    payload = national_card_payload()
+    payload.pop("family_number")
+    serializer = MinorCreateSerializer(data=payload)
     assert serializer.is_valid(), serializer.errors
     created = create_minor(
         guardian=guardian,
@@ -120,9 +123,10 @@ def test_concurrent_duplicate_guardian_approvals_are_consistent():
         validated_data=serializer.validated_data,
     )
     minor = patient_model().objects.exclude(pk=guardian_profile.pk).get()
-    approve_identity_document(
-        document=document_model().objects.get(patient=minor), agent=agent
-    )
+    minor_card = document_model().objects.get(patient=minor)
+    minor_card.family_number = "FAM-100"
+    minor_card.save(update_fields=("family_number", "updated_at"))
+    approve_identity_document(document=minor_card, agent=agent)
     relationship = created.relationship
     results, failures = run_concurrently(
         lambda: (
@@ -169,3 +173,43 @@ def test_concurrent_idempotent_minor_creation_produces_one_minor():
     assert sorted(results) == [False, True]
     assert patient_model().objects.exclude(pk=guardian_profile.pk).count() == 1
     assert relationship_model().objects.count() == 1
+
+
+def test_concurrent_duplicate_pending_relationships_keep_one_live_tuple():
+    require_postgresql()
+    guardian, _, _ = create_verified_guardian()
+    patient = patient_model().objects.create(
+        digital_id="39999999999999999",
+        full_name="Synthetic Minor",
+        date_of_birth="2015-01-01",
+        sex="UNSPECIFIED",
+        nationality="IQ",
+    )
+
+    def operation():
+        return (
+            relationship_model()
+            .objects.create(
+                guardian_user=guardian,
+                minor_patient=patient,
+                relationship="FATHER",
+            )
+            .uuid
+        )
+
+    results, failures = run_concurrently(operation, operation)
+
+    assert len(results) == 1
+    assert len(failures) == 1
+    assert (
+        relationship_model()
+        .objects.filter(
+            guardian_user=guardian,
+            minor_patient=patient,
+            relationship="FATHER",
+            verification_status="PENDING",
+            ended_at__isnull=True,
+        )
+        .count()
+        == 1
+    )

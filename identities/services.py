@@ -11,12 +11,10 @@ from django.db import transaction
 from django.utils import timezone
 from PIL import Image, UnidentifiedImageError
 
-from accounts.models import User
 from audit.models import AuditLog
 from audit.services import record_audit
 from identities.exceptions import (
     IdentityDocumentConflict,
-    IdentityExtractionJobConflict,
     IdentityExtractionJobMismatch,
     IdentityFileStorageFailed,
     IdentityTransitionConflict,
@@ -518,6 +516,13 @@ def approve_identity_document(*, document, agent):
             },
         )
         _sync_profile_identity_status(profile)
+        if (
+            document.document_type
+            == IdentityDocument.DocumentType.UNIFIED_NATIONAL_CARD
+        ):
+            from guardians.services import revalidate_relationships_for_identity
+
+            revalidate_relationships_for_identity(patient=profile, actor=agent)
         return document
 
 

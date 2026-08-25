@@ -11,11 +11,20 @@ from documents.api import (
     MinorMedicalDocumentFileView,
     MinorMedicalDocumentPendingConfirmationView,
 )
-from guardians.api import MinorCollectionView, MinorDetailView
+from guardians.api import (
+    GuardianRelationshipRevokeView,
+    MinorCollectionView,
+    MinorDetailView,
+)
 from labs.api import MinorLabResultsView
 
 urlpatterns = [
     path("", MinorCollectionView.as_view(), name="minor-list-create"),
+    path(
+        "relationships/<uuid:relationship_uuid>/revoke/",
+        GuardianRelationshipRevokeView.as_view(),
+        name="guardian-relationship-revoke",
+    ),
     path("<uuid:minor_uuid>/", MinorDetailView.as_view(), name="minor-detail"),
     path(
         "<uuid:minor_uuid>/archive/",

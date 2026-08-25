@@ -210,8 +210,8 @@ def test_parent_minor_lifecycle(api_client, tmp_path):
     from guardians.services import approve_guardian_relationship
     from identities.services import approve_identity_document as approve_id
     from tests.test_minors_guardians import (
-        birth_document_payload,
         create_verified_guardian,
+        national_card_payload,
         patient_model,
     )
 
@@ -219,9 +219,11 @@ def test_parent_minor_lifecycle(api_client, tmp_path):
         email="m15-guardian@example.com", family="FAM-M15"
     )
     api_client.force_authenticate(user=guardian)
+    minor_payload = national_card_payload()
+    minor_payload.pop("family_number")
     minor_resp = api_client.post(
         "/api/v1/minors/",
-        birth_document_payload(),
+        minor_payload,
         format="multipart",
         HTTP_IDEMPOTENCY_KEY="m15-minor-1",
     )
@@ -231,7 +233,10 @@ def test_parent_minor_lifecycle(api_client, tmp_path):
     assert minor.pk != profile.pk
 
     # Approve minor's identity + relationship so guardian can upload.
-    approve_id(document=IdentityDocument.objects.get(patient=minor), agent=agent)
+    minor_card = IdentityDocument.objects.get(patient=minor)
+    minor_card.family_number = "FAM-M15"
+    minor_card.save(update_fields=("family_number", "updated_at"))
+    approve_id(document=minor_card, agent=agent)
     relationship = GuardianRelationship.objects.get(minor_patient=minor)
     approve_guardian_relationship(relationship=relationship, agent=agent)
 

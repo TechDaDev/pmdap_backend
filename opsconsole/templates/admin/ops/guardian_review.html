@@ -1,0 +1,8 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<h1>Review guardian relationship</h1>
+{% if messages %}<ul class="messagelist">{% for message in messages %}<li class="{{ message.tags }}">{{ message }}</li>{% endfor %}</ul>{% endif %}
+<table><tr><th>Relationship</th><td>{{ relationship.get_relationship_display }}</td></tr><tr><th>Adult confirmed</th><td>{{ adult_confirmed|yesno:"Yes,No" }}</td></tr><tr><th>Minor confirmed</th><td>{{ minor_confirmed|yesno:"Yes,No" }}</td></tr><tr><th>Age valid</th><td>{{ age_valid|yesno:"Yes,No" }}</td></tr><tr><th>Family evidence</th><td>{{ relationship.get_family_number_result_display }}</td></tr><tr><th>Father name evidence</th><td>{{ relationship.get_name_evidence_result_display }}</td></tr><tr><th>Official evidence files</th><td>{{ relationship.evidences.count }}</td></tr></table>
+{% if relationship.verification_status == 'PENDING' %}<form method="post" action="{% url 'admin:ops_guardian_approve' relationship.pk %}">{% csrf_token %}<button type="submit">Approve</button></form><form method="post" action="{% url 'admin:ops_guardian_reject' relationship.pk %}">{% csrf_token %}<label>Reason <textarea name="reason" required></textarea></label><button type="submit">Reject</button></form>{% endif %}
+<p><a href="{% url 'admin:ops_guardian_queue' %}">Back to queue</a></p>
+{% endblock %}

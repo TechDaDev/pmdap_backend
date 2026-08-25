@@ -21,7 +21,6 @@ from documents.services import (
 )
 from guardians.models import GuardianRelationship
 from identities.services import (
-    approve_identity_document,
     reject_identity_document,
     submit_identity_document,
 )
@@ -124,11 +123,9 @@ def test_guardian_flow_audit(api_client):
     create_minor(api_client, guardian)
     minor = patient_model().objects.exclude(pk=guardian_profile.pk).get()
     relationship = relationship_model().objects.get(minor_patient=minor)
-    from identities.models import IdentityDocument
+    from tests.test_guardian_relationships import approve_minor_document
 
-    approve_identity_document(
-        document=IdentityDocument.objects.get(patient=minor), agent=agent
-    )
+    approve_minor_document(minor, agent)
     actions = audit_actions()
     assert AuditLog.Action.MINOR_CREATED in actions
     assert AuditLog.Action.GUARDIAN_RELATIONSHIP_SUBMITTED in actions

@@ -9,7 +9,6 @@ from guardians.models import GuardianEvidence, GuardianRelationship
 from identities.models import IdentityDocument
 from identities.serializers import (
     IdentityDocumentInputSerializer,
-    IdentityDocumentSummarySerializer,
     RejectUnknownFieldsMixin,
 )
 from patients.models import PatientProfile
@@ -33,9 +32,6 @@ class MinorCreateSerializer(RejectUnknownFieldsMixin, serializers.Serializer):
     )
     document_number = serializers.CharField(max_length=128)
     national_number = serializers.CharField(
-        max_length=128, required=False, allow_blank=True, default=""
-    )
-    family_number = serializers.CharField(
         max_length=128, required=False, allow_blank=True, default=""
     )
     issuing_country = serializers.RegexField(r"^[A-Za-z]{2}$", required=False)
@@ -87,7 +83,6 @@ class MinorCreateSerializer(RejectUnknownFieldsMixin, serializers.Serializer):
             "document_type",
             "document_number",
             "national_number",
-            "family_number",
             "issuing_country",
             "issue_date",
             "expiry_date",
@@ -127,6 +122,9 @@ class GuardianRelationshipSerializer(serializers.ModelSerializer):
             "relationship",
             "verification_status",
             "family_number_result",
+            "name_evidence_result",
+            "evidence_checked_at",
+            "evidence_policy_version",
             "active",
             "started_at",
             "verified_at",
@@ -184,19 +182,13 @@ class GuardianEvidenceSerializer(serializers.ModelSerializer):
 
 
 class GuardianVerificationPatientSerializer(serializers.ModelSerializer):
-    identity_documents = IdentityDocumentSummarySerializer(many=True, read_only=True)
-
     class Meta:
         model = PatientProfile
         fields = (
             "uuid",
             "digital_id",
             "full_name",
-            "date_of_birth",
-            "sex",
-            "nationality",
             "identity_status",
-            "identity_documents",
         )
         read_only_fields = fields
 
@@ -236,3 +228,9 @@ class RelationshipRejectionSerializer(RejectUnknownFieldsMixin, serializers.Seri
     rejection_reason = serializers.CharField(
         min_length=1, max_length=1000, trim_whitespace=True
     )
+
+
+class RelationshipRevocationSerializer(
+    RejectUnknownFieldsMixin, serializers.Serializer
+):
+    reason = serializers.CharField(min_length=1, max_length=1000, trim_whitespace=True)

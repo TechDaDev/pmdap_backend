@@ -6,7 +6,6 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.models import User
 from accounts.serializers import ErrorEnvelopeSerializer
 from guardians.exceptions import (
     GuardianRelationshipNotFound,
@@ -17,19 +16,24 @@ from guardians.models import GuardianEvidence, GuardianRelationship
 from guardians.serializers import (
     EmptySerializer,
     GuardianRelationshipFilterSerializer,
+    GuardianRelationshipSerializer,
     GuardianRelationshipVerificationSerializer,
     MinorCreateResponseSerializer,
     MinorCreateSerializer,
     MinorSerializer,
     RelationshipRejectionSerializer,
+    RelationshipRevocationSerializer,
 )
 from guardians.services import (
     approve_guardian_relationship,
+    authorized_guardian_relationship,
     create_minor,
     eligible_guardian_profile,
     reject_guardian_relationship,
+    revoke_guardian_relationship,
 )
 from identities.exceptions import VerificationAgentRequired
+from identities.permissions import can_verify_identity
 
 
 def envelope(name, child):
@@ -66,7 +70,7 @@ def page_response(request, items, serializer_class):
 
 
 def require_agent(user):
-    if user.role != User.Role.IDENTITY_VERIFICATION_AGENT:
+    if not can_verify_identity(user):
         raise VerificationAgentRequired()
 
 
@@ -89,24 +93,11 @@ def verification_relationship(user, relationship_uuid):
 
 
 def authorized_minor_relationship(user, minor_uuid):
-    try:
-        relationship = (
-            GuardianRelationship.objects.select_related("minor_patient")
-            .filter(
-                guardian_user=user,
-                minor_patient__uuid=minor_uuid,
-                verification_status=GuardianRelationship.VerificationStatus.VERIFIED,
-                active=True,
-            )
-            .first()
-        )
-    except ValueError as exc:
-        raise GuardianRelationshipNotFound() from exc
+    relationship = authorized_guardian_relationship(
+        user, minor_uuid, raise_ineligible=True
+    )
     if relationship is None:
         raise GuardianRelationshipNotFound()
-    if not relationship.minor_patient.is_minor:
-        raise GuardianRelationshipNotFound()
-    eligible_guardian_profile(user)
     return relationship
 
 
@@ -238,11 +229,7 @@ class GuardianVerificationCollectionView(APIView):
         filters.is_valid(raise_exception=True)
         queryset = GuardianRelationship.objects.select_related(
             "minor_patient", "guardian_user__patient_profile"
-        ).prefetch_related(
-            "evidences",
-            "minor_patient__identity_documents",
-            "guardian_user__patient_profile__identity_documents",
-        )
+        ).prefetch_related("evidences")
         if value := filters.validated_data.get("status"):
             queryset = queryset.filter(verification_status=value)
         return page_response(
@@ -329,6 +316,63 @@ class GuardianVerificationRejectView(APIView):
         return Response(
             {"data": GuardianRelationshipVerificationSerializer(relationship).data}
         )
+
+
+class GuardianRelationshipRevokeView(APIView):
+    @extend_schema(
+        operation_id="guardian_relationship_revoke",
+        request=RelationshipRevocationSerializer,
+        responses={
+            200: envelope(
+                "GuardianRelationshipRevoked",
+                GuardianRelationshipSerializer(read_only=True),
+            ),
+            400: ErrorEnvelopeSerializer,
+            401: ErrorEnvelopeSerializer,
+            403: ErrorEnvelopeSerializer,
+            404: ErrorEnvelopeSerializer,
+            409: ErrorEnvelopeSerializer,
+        },
+        tags=["Minors and guardians"],
+    )
+    def post(self, request, relationship_uuid):
+        try:
+            relationship = GuardianRelationship.objects.get(uuid=relationship_uuid)
+        except (GuardianRelationship.DoesNotExist, ValueError) as exc:
+            raise GuardianRelationshipNotFound() from exc
+        if relationship.guardian_user_id != request.user.pk and not can_verify_identity(
+            request.user
+        ):
+            raise GuardianRelationshipNotFound()
+        serializer = RelationshipRevocationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        relationship = revoke_guardian_relationship(
+            relationship=relationship,
+            actor=request.user,
+            reason=serializer.validated_data["reason"],
+        )
+        return Response({"data": GuardianRelationshipSerializer(relationship).data})
+
+
+class GuardianVerificationRevokeView(GuardianRelationshipRevokeView):
+    @extend_schema(
+        operation_id="guardian_relationship_verification_revoke",
+        request=RelationshipRevocationSerializer,
+        responses={
+            200: envelope(
+                "GuardianRelationshipVerificationRevoked",
+                GuardianRelationshipSerializer(read_only=True),
+            ),
+            400: ErrorEnvelopeSerializer,
+            401: ErrorEnvelopeSerializer,
+            403: ErrorEnvelopeSerializer,
+            404: ErrorEnvelopeSerializer,
+            409: ErrorEnvelopeSerializer,
+        },
+        tags=["Guardian relationship verification"],
+    )
+    def post(self, request, relationship_uuid):
+        return super().post(request, relationship_uuid)
 
 
 class GuardianEvidenceFileView(APIView):

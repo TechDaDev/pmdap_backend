@@ -23,6 +23,11 @@ class GuardianRelationship(UUIDModel):
         MISMATCH = "MISMATCH", "Mismatch"
         UNAVAILABLE = "UNAVAILABLE", "Unavailable"
 
+    class NameEvidenceResult(models.TextChoices):
+        MATCH = "MATCH", "Match"
+        MISMATCH = "MISMATCH", "Mismatch"
+        UNAVAILABLE = "UNAVAILABLE", "Unavailable"
+
     class EndedReason(models.TextChoices):
         PATIENT_REACHED_ADULTHOOD = (
             "PATIENT_REACHED_ADULTHOOD",
@@ -58,6 +63,27 @@ class GuardianRelationship(UUIDModel):
         choices=FamilyNumberResult,
         default=FamilyNumberResult.UNAVAILABLE,
     )
+    name_evidence_result = models.CharField(
+        max_length=16,
+        choices=NameEvidenceResult,
+        default=NameEvidenceResult.UNAVAILABLE,
+    )
+    guardian_identity_document = models.ForeignKey(
+        "identities.IdentityDocument",
+        on_delete=models.PROTECT,
+        related_name="guardian_relationship_checks",
+        null=True,
+        blank=True,
+    )
+    minor_identity_document = models.ForeignKey(
+        "identities.IdentityDocument",
+        on_delete=models.PROTECT,
+        related_name="minor_relationship_checks",
+        null=True,
+        blank=True,
+    )
+    evidence_checked_at = models.DateTimeField(null=True, blank=True)
+    evidence_policy_version = models.CharField(max_length=32, blank=True, default="")
     active = models.BooleanField(default=False)
     started_at = models.DateTimeField(default=timezone.now)
     verified_by = models.ForeignKey(
@@ -70,6 +96,7 @@ class GuardianRelationship(UUIDModel):
     verified_at = models.DateTimeField(null=True, blank=True)
     ended_at = models.DateTimeField(null=True, blank=True)
     ended_reason = models.CharField(max_length=32, choices=EndedReason, blank=True)
+    ended_reason_detail = models.TextField(blank=True)
     rejection_reason = models.TextField(blank=True)
 
     class Meta:
@@ -77,8 +104,11 @@ class GuardianRelationship(UUIDModel):
         constraints = [
             models.UniqueConstraint(
                 fields=("guardian_user", "minor_patient", "relationship"),
-                condition=Q(active=True),
-                name="guardian_one_active_relationship_type",
+                condition=Q(
+                    verification_status__in=("PENDING", "VERIFIED"),
+                    ended_at__isnull=True,
+                ),
+                name="guardian_one_live_relationship_type",
             ),
             models.CheckConstraint(
                 condition=Q(active=False) | Q(verification_status="VERIFIED"),

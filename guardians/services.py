@@ -1,9 +1,11 @@
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from datetime import date
 
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from accounts.models import User
@@ -21,6 +23,7 @@ from guardians.models import (
     MinorCreationRequest,
 )
 from identities.models import IdentityDocument
+from identities.permissions import can_verify_identity
 from identities.services import (
     delete_identity_file_from_storage,
     inspect_identity_upload,
@@ -36,6 +39,83 @@ class MinorCreationResult:
     minor: PatientProfile
     relationship: GuardianRelationship
     created: bool
+
+
+EVIDENCE_POLICY_VERSION = "M27_V1"
+
+
+def normalize_family_number(value):
+    return re.sub(r"\s+", "", (value or "").strip()).upper()
+
+
+def _normalize_name(value):
+    return " ".join((value or "").split()).casefold()
+
+
+def _authoritative_card(profile):
+    return (
+        IdentityDocument.objects.filter(
+            patient=profile,
+            document_type=IdentityDocument.DocumentType.UNIFIED_NATIONAL_CARD,
+            status=IdentityDocument.LifecycleStatus.CURRENT,
+            verification_status=IdentityDocument.VerificationStatus.VERIFIED,
+        )
+        .order_by("-verified_at", "-created_at")
+        .first()
+    )
+
+
+def evaluate_relationship_evidence(relationship, *, save=True):
+    guardian_profile = relationship.guardian_user.patient_profile
+    guardian_card = _authoritative_card(guardian_profile)
+    minor_card = _authoritative_card(relationship.minor_patient)
+    family_result = GuardianRelationship.FamilyNumberResult.UNAVAILABLE
+    if (
+        relationship.relationship
+        in {
+            GuardianRelationship.Relationship.FATHER,
+            GuardianRelationship.Relationship.MOTHER,
+        }
+        and guardian_card
+        and minor_card
+    ):
+        guardian_family = normalize_family_number(guardian_card.family_number)
+        minor_family = normalize_family_number(minor_card.family_number)
+        if guardian_family and minor_family:
+            family_result = (
+                GuardianRelationship.FamilyNumberResult.MATCH
+                if guardian_family == minor_family
+                else GuardianRelationship.FamilyNumberResult.MISMATCH
+            )
+    name_result = GuardianRelationship.NameEvidenceResult.UNAVAILABLE
+    if relationship.relationship == GuardianRelationship.Relationship.FATHER:
+        guardian_name = _normalize_name(guardian_profile.full_name)
+        father_name = _normalize_name(relationship.minor_patient.father_name)
+        if guardian_name and father_name:
+            name_result = (
+                GuardianRelationship.NameEvidenceResult.MATCH
+                if guardian_name == father_name
+                else GuardianRelationship.NameEvidenceResult.MISMATCH
+            )
+    relationship.family_number_result = family_result
+    relationship.name_evidence_result = name_result
+    relationship.guardian_identity_document = guardian_card
+    relationship.minor_identity_document = minor_card
+    relationship.evidence_checked_at = timezone.now()
+    relationship.evidence_policy_version = EVIDENCE_POLICY_VERSION
+    if save:
+        relationship.save(
+            update_fields=(
+                "family_number_result",
+                "name_evidence_result",
+                "guardian_identity_document",
+                "minor_identity_document",
+                "evidence_checked_at",
+                "evidence_policy_version",
+                "updated_at",
+            )
+        )
+    return relationship
 
 
 def eligible_guardian_profile(user, *, for_update=False):
@@ -101,42 +181,12 @@ def _request_fingerprint(validated_data):
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
-def _family_number_result(guardian_profile, identity_data, relationship_type):
-    if relationship_type not in {
-        GuardianRelationship.Relationship.FATHER,
-        GuardianRelationship.Relationship.MOTHER,
-    }:
-        return GuardianRelationship.FamilyNumberResult.UNAVAILABLE
-    if (
-        identity_data["document_type"]
-        != IdentityDocument.DocumentType.UNIFIED_NATIONAL_CARD
-    ):
-        return GuardianRelationship.FamilyNumberResult.UNAVAILABLE
-    child_family = identity_data.get("family_number", "")
-    guardian_family = (
-        IdentityDocument.objects.filter(
-            patient=guardian_profile,
-            document_type=IdentityDocument.DocumentType.UNIFIED_NATIONAL_CARD,
-            status=IdentityDocument.LifecycleStatus.CURRENT,
-            verification_status=IdentityDocument.VerificationStatus.VERIFIED,
-        )
-        .values_list("family_number", flat=True)
-        .first()
-        or ""
-    )
-    if not child_family or not guardian_family:
-        return GuardianRelationship.FamilyNumberResult.UNAVAILABLE
-    if child_family == guardian_family:
-        return GuardianRelationship.FamilyNumberResult.MATCH
-    return GuardianRelationship.FamilyNumberResult.MISMATCH
-
-
 def create_minor(*, guardian, idempotency_key, validated_data):
     request_hash = _request_fingerprint(validated_data)
     stored_files = []
     try:
         with transaction.atomic():
-            guardian_profile = eligible_guardian_profile(guardian, for_update=True)
+            eligible_guardian_profile(guardian, for_update=True)
             creation, _ = MinorCreationRequest.objects.get_or_create(
                 guardian_user=guardian,
                 idempotency_key=idempotency_key,
@@ -160,16 +210,11 @@ def create_minor(*, guardian, idempotency_key, validated_data):
             )
             minor.refresh_from_db()
             stored_files.extend([document.front_image, document.back_image])
-            family_result = _family_number_result(
-                guardian_profile,
-                validated_data["identity_data"],
-                validated_data["relationship"],
-            )
             relationship = GuardianRelationship.objects.create(
                 guardian_user=guardian,
                 minor_patient=minor,
                 relationship=validated_data["relationship"],
-                family_number_result=family_result,
+                family_number_result=GuardianRelationship.FamilyNumberResult.UNAVAILABLE,
             )
             if evidence_upload := validated_data.get("evidence_file"):
                 evidence_file = persist_identity_upload(evidence_upload)
@@ -188,21 +233,6 @@ def create_minor(*, guardian, idempotency_key, validated_data):
                 GuardianRelationshipEvent.objects.create(
                     relationship=relationship,
                     event_type=event_type,
-                    actor=guardian,
-                    metadata={},
-                )
-            family_event = {
-                GuardianRelationship.FamilyNumberResult.MATCH: (
-                    GuardianRelationshipEvent.EventType.FAMILY_MATCHED
-                ),
-                GuardianRelationship.FamilyNumberResult.MISMATCH: (
-                    GuardianRelationshipEvent.EventType.FAMILY_MISMATCHED
-                ),
-            }.get(family_result)
-            if family_event:
-                GuardianRelationshipEvent.objects.create(
-                    relationship=relationship,
-                    event_type=family_event,
                     actor=guardian,
                     metadata={},
                 )
@@ -233,27 +263,11 @@ def create_minor(*, guardian, idempotency_key, validated_data):
 
 
 def submit_guardian_relationship(*, guardian, minor, relationship_type):
-    guardian_profile = eligible_guardian_profile(guardian)
+    eligible_guardian_profile(guardian)
+    if minor.user_id == guardian.pk:
+        raise GuardianRelationshipConflict()
     if not minor.is_minor or minor.user_id is not None:
         raise GuardianRelationshipConflict()
-    child_family = (
-        IdentityDocument.objects.filter(
-            patient=minor,
-            document_type=IdentityDocument.DocumentType.UNIFIED_NATIONAL_CARD,
-            status=IdentityDocument.LifecycleStatus.CURRENT,
-        )
-        .values_list("family_number", flat=True)
-        .first()
-        or ""
-    )
-    family_result = _family_number_result(
-        guardian_profile,
-        {
-            "document_type": IdentityDocument.DocumentType.UNIFIED_NATIONAL_CARD,
-            "family_number": child_family,
-        },
-        relationship_type,
-    )
     if GuardianRelationship.objects.filter(
         guardian_user=guardian,
         minor_patient=minor,
@@ -262,6 +276,7 @@ def submit_guardian_relationship(*, guardian, minor, relationship_type):
             GuardianRelationship.VerificationStatus.PENDING,
             GuardianRelationship.VerificationStatus.VERIFIED,
         ),
+        ended_at__isnull=True,
     ).exists():
         raise GuardianRelationshipConflict()
     try:
@@ -270,8 +285,9 @@ def submit_guardian_relationship(*, guardian, minor, relationship_type):
                 guardian_user=guardian,
                 minor_patient=minor,
                 relationship=relationship_type,
-                family_number_result=family_result,
+                family_number_result=GuardianRelationship.FamilyNumberResult.UNAVAILABLE,
             )
+            evaluate_relationship_evidence(relationship)
             GuardianRelationshipEvent.objects.create(
                 relationship=relationship,
                 event_type=GuardianRelationshipEvent.EventType.SUBMITTED,
@@ -292,7 +308,7 @@ def submit_guardian_relationship(*, guardian, minor, relationship_type):
 
 
 def _require_agent(agent):
-    if agent.role != User.Role.IDENTITY_VERIFICATION_AGENT:
+    if not can_verify_identity(agent):
         from identities.exceptions import VerificationAgentRequired
 
         raise VerificationAgentRequired()
@@ -300,6 +316,12 @@ def _require_agent(agent):
 
 def approve_guardian_relationship(*, relationship, agent):
     _require_agent(agent)
+    # Persist the latest evidence outcome for the review record even when the
+    # subsequent locked transition is denied.
+    relationship = GuardianRelationship.objects.select_related(
+        "guardian_user__patient_profile", "minor_patient"
+    ).get(pk=relationship.pk)
+    evaluate_relationship_evidence(relationship)
     with transaction.atomic():
         relationship = (
             GuardianRelationship.objects.select_for_update()
@@ -333,6 +355,19 @@ def approve_guardian_relationship(*, relationship, agent):
             status=IdentityDocument.LifecycleStatus.CURRENT,
             verification_status=IdentityDocument.VerificationStatus.VERIFIED,
         ).exists():
+            raise GuardianRelationshipConflict()
+        if minor.identity_status != PatientProfile.IdentityStatus.VERIFIED:
+            raise GuardianRelationshipConflict()
+        evaluate_relationship_evidence(relationship)
+        if (
+            relationship.relationship
+            in {
+                GuardianRelationship.Relationship.FATHER,
+                GuardianRelationship.Relationship.MOTHER,
+            }
+            and relationship.family_number_result
+            != GuardianRelationship.FamilyNumberResult.MATCH
+        ):
             raise GuardianRelationshipConflict()
         if (
             relationship.relationship
@@ -377,6 +412,107 @@ def approve_guardian_relationship(*, relationship, agent):
             },
         )
         return relationship
+
+
+def revoke_guardian_relationship(*, relationship, actor, reason):
+    reason = (reason or "").strip()
+    if not reason:
+        raise GuardianRelationshipConflict()
+    if actor.pk != relationship.guardian_user_id and not can_verify_identity(actor):
+        from identities.exceptions import VerificationAgentRequired
+
+        raise VerificationAgentRequired()
+    with transaction.atomic():
+        relationship = (
+            GuardianRelationship.objects.select_for_update()
+            .select_related("minor_patient")
+            .get(pk=relationship.pk)
+        )
+        if not relationship.active or relationship.ended_at is not None:
+            raise GuardianRelationshipConflict()
+        relationship.active = False
+        relationship.ended_at = timezone.now()
+        relationship.ended_reason = GuardianRelationship.EndedReason.REVOKED
+        relationship.ended_reason_detail = reason
+        relationship.save(
+            update_fields=(
+                "active",
+                "ended_at",
+                "ended_reason",
+                "ended_reason_detail",
+                "updated_at",
+            )
+        )
+        GuardianRelationshipEvent.objects.create(
+            relationship=relationship,
+            event_type=GuardianRelationshipEvent.EventType.ENDED,
+            actor=actor,
+            metadata={},
+        )
+        record_audit(
+            action=AuditLog.Action.GUARDIAN_RELATIONSHIP_ENDED,
+            actor=actor,
+            patient=relationship.minor_patient,
+            resource_type="GUARDIAN_RELATIONSHIP",
+            resource_uuid=relationship.uuid,
+            previous_values={"active": True},
+            new_values={"active": False, "ended_reason": relationship.ended_reason},
+        )
+        return relationship
+
+
+def revalidate_relationships_for_identity(*, patient, actor):
+    """Re-evaluate parent links when a verified national card changes."""
+    relationships = GuardianRelationship.objects.select_for_update(of=("self",)).filter(
+        Q(minor_patient=patient) | Q(guardian_user__patient_profile=patient),
+        verification_status__in=(
+            GuardianRelationship.VerificationStatus.PENDING,
+            GuardianRelationship.VerificationStatus.VERIFIED,
+        ),
+        ended_at__isnull=True,
+    )
+    for relationship in relationships:
+        if (
+            relationship.relationship
+            == GuardianRelationship.Relationship.LEGAL_GUARDIAN
+        ):
+            continue
+        evaluate_relationship_evidence(relationship)
+        if (
+            relationship.active
+            and relationship.family_number_result
+            != GuardianRelationship.FamilyNumberResult.MATCH
+        ):
+            relationship.active = False
+            relationship.ended_at = timezone.now()
+            relationship.ended_reason = (
+                GuardianRelationship.EndedReason.RELATIONSHIP_INVALIDATED
+            )
+            relationship.ended_reason_detail = "Authoritative family evidence changed."
+            relationship.save(
+                update_fields=(
+                    "active",
+                    "ended_at",
+                    "ended_reason",
+                    "ended_reason_detail",
+                    "updated_at",
+                )
+            )
+            GuardianRelationshipEvent.objects.create(
+                relationship=relationship,
+                event_type=GuardianRelationshipEvent.EventType.ENDED,
+                actor=actor,
+                metadata={},
+            )
+            record_audit(
+                action=AuditLog.Action.GUARDIAN_RELATIONSHIP_ENDED,
+                actor=actor,
+                patient=relationship.minor_patient,
+                resource_type="GUARDIAN_RELATIONSHIP",
+                resource_uuid=relationship.uuid,
+                previous_values={"active": True},
+                new_values={"active": False, "ended_reason": relationship.ended_reason},
+            )
 
 
 def reject_guardian_relationship(*, relationship, agent, reason):
@@ -439,21 +575,43 @@ def reject_guardian_relationship(*, relationship, agent, reason):
         return relationship
 
 
-def guardian_can_access_minor(user, minor):
+def authorized_guardian_relationship(user, minor, *, raise_ineligible=False):
+    """Single medical and identity authorization policy for a minor link."""
     if (
         user.role != User.Role.PATIENT
         or user.status != User.Status.ACTIVE
         or not user.is_active
-        or not minor.is_minor
     ):
-        return False
+        return None
+    filters = {
+        "guardian_user": user,
+        "verification_status": GuardianRelationship.VerificationStatus.VERIFIED,
+        "active": True,
+        "ended_at__isnull": True,
+        "ended_reason": "",
+    }
+    if isinstance(minor, PatientProfile):
+        filters["minor_patient"] = minor
+    else:
+        filters["minor_patient__uuid"] = minor
+    try:
+        relationship = (
+            GuardianRelationship.objects.select_related("minor_patient")
+            .filter(**filters)
+            .first()
+        )
+    except (TypeError, ValueError):
+        return None
+    if relationship is None or not relationship.minor_patient.is_minor:
+        return None
     try:
         eligible_guardian_profile(user)
     except GuardianNotVerified:
-        return False
-    return GuardianRelationship.objects.filter(
-        guardian_user=user,
-        minor_patient=minor,
-        verification_status=GuardianRelationship.VerificationStatus.VERIFIED,
-        active=True,
-    ).exists()
+        if raise_ineligible:
+            raise
+        return None
+    return relationship
+
+
+def guardian_can_access_minor(user, minor):
+    return authorized_guardian_relationship(user, minor) is not None

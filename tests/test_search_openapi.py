@@ -66,6 +66,7 @@ def test_openapi_search_results_reuse_safe_document_summary(api_client):
         "physician_name",
         "processing_status",
         "created_at",
+        "file",
     }
     encoded = str(schema)
     for forbidden in ("sha256", "storage_key", "document_text", "search_vector"):
