@@ -125,6 +125,19 @@ def test_mother_name_split_line_label_then_value():
     assert fields["mother_name"]["value"] == "TESTMOTHER"
 
 
+def test_mother_name_observed_kurdish_label_variant():
+    fields, _, _ = _run(
+        [
+            extraction.SideLine("FRONT", "الاسم اناو TESTNAME", 0.9),
+            extraction.SideLine("FRONT", "اباوك TESTFATHER", 0.9),
+            extraction.SideLine("FRONT", "ابابيرTESTGRAND", 0.9),
+            extraction.SideLine("FRONT", "دايك TESTMOTHER", 0.9),
+        ]
+    )
+
+    assert fields["mother_name"]["value"] == "TESTMOTHER"
+
+
 @pytest.mark.parametrize(
     "next_line",
     (
