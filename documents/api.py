@@ -7,20 +7,21 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.serializers import ErrorEnvelopeSerializer
-from documents.date_services import confirm_document_date, pending_confirmation_queryset
-from documents.page_services import pending_page_units
+from documents.date_services import confirm_document_date
 from documents.exceptions import (
     MedicalDocumentNotFound,
     MedicalFileStorageFailed,
     MedicalFileUnavailable,
 )
 from documents.models import MedicalDocument, StoredFile
+from documents.page_services import pending_page_units
 
 try:
     from botocore.exceptions import ClientError as _S3ClientError
 except ImportError:  # pragma: no cover - S3 client is optional in minimal installs
     _S3ClientError = OSError
 
+from documents.narrative import extract_narrative
 from documents.serializers import (
     DateCandidateSerializer,
     DocumentDateConfirmationResponseSerializer,
@@ -36,7 +37,6 @@ from documents.serializers import (
     MedicalDocumentUploadSerializer,
     PendingDateConfirmationSerializer,
 )
-from documents.narrative import extract_narrative
 from documents.services import (
     create_medical_document,
     soft_delete_medical_document,
@@ -410,13 +410,10 @@ class MedicalDocumentPendingConfirmationView(APIView):
         results = []
         for page_unit in queryset:
             document = page_unit.document
-            rows = (
-                document.date_candidates.filter(
-                    page_number=page_unit.page_number,
-                    is_current=True,
-                )
-                .order_by("-score", "uuid")
-            )
+            rows = document.date_candidates.filter(
+                page_number=page_unit.page_number,
+                is_current=True,
+            ).order_by("-score", "uuid")
             # Canonical candidate shape (serializer field names) — never raw
             # OCR context. Empty list for a zero-candidate page, which is
             # still returned (manual date fallback).
@@ -476,9 +473,7 @@ def _page_lab_result_count(document, page_unit):
         return extraction.result_count
     if document.pages.count() == 1:
         extraction = (
-            LabReportExtraction.objects.filter(
-                document=document, status="COMPLETED"
-            )
+            LabReportExtraction.objects.filter(document=document, status="COMPLETED")
             .order_by("-created_at")
             .first()
         )
@@ -532,9 +527,7 @@ class MedicalDocumentPageListView(_PageAccessMixin, APIView):
             "page_count": len(pages),
             "pages": items,
         }
-        return Response(
-            {"data": MedicalDocumentPageSummarySerializer(payload).data}
-        )
+        return Response({"data": MedicalDocumentPageSummarySerializer(payload).data})
 
 
 class MedicalDocumentPageDetailView(_PageAccessMixin, APIView):
@@ -571,9 +564,7 @@ class MedicalDocumentPageDetailView(_PageAccessMixin, APIView):
             ),
             many=True,
         ).data
-        extraction = (
-            page.lab_extractions.order_by("-created_at").first()
-        )
+        extraction = page.lab_extractions.order_by("-created_at").first()
         results = []
         if extraction is not None and extraction.status == "COMPLETED":
             results = LabResultSerializer(
@@ -610,9 +601,7 @@ class MedicalDocumentPageLabResultsView(_PageAccessMixin, APIView):
                         "page_number": serializers.IntegerField(),
                         "extraction_status": serializers.CharField(),
                         "result_count": serializers.IntegerField(),
-                        "results": serializers.ListField(
-                            child=serializers.DictField()
-                        ),
+                        "results": serializers.ListField(child=serializers.DictField()),
                     },
                 ),
             ),
@@ -628,9 +617,7 @@ class MedicalDocumentPageLabResultsView(_PageAccessMixin, APIView):
         page = self.get_page(document, page_number)
         from labs.serializers import LabResultSerializer
 
-        extraction = (
-            page.lab_extractions.order_by("-created_at").first()
-        )
+        extraction = page.lab_extractions.order_by("-created_at").first()
         if extraction is None:
             if document.pages.count() == 1:
                 extraction = (
@@ -766,15 +753,45 @@ class MinorMedicalDocumentDateConfirmationView(MedicalDocumentDateConfirmationVi
 
 
 @extend_schema_view(
-    get=extend_schema(
-        operation_id="minor_medical_document_date_confirmations_pending"
-    ),
+    get=extend_schema(operation_id="minor_medical_document_date_confirmations_pending"),
 )
 class MinorMedicalDocumentPendingConfirmationView(
     MedicalDocumentPendingConfirmationView
 ):
     def get_patient(self, request, **kwargs):
         return authorized_minor_patient(request, kwargs["minor_uuid"])
+
+
+@extend_schema_view(get=extend_schema(operation_id="minor_medical_document_pages"))
+class MinorMedicalDocumentPageListView(MedicalDocumentPageListView):
+    def get_patient(self, request, **kwargs):
+        return authorized_minor_patient(request, self.kwargs["minor_uuid"])
+
+
+@extend_schema_view(
+    get=extend_schema(operation_id="minor_medical_document_page_retrieve")
+)
+class MinorMedicalDocumentPageDetailView(MedicalDocumentPageDetailView):
+    def get_patient(self, request, **kwargs):
+        return authorized_minor_patient(request, self.kwargs["minor_uuid"])
+
+
+@extend_schema_view(
+    get=extend_schema(operation_id="minor_medical_document_page_lab_results")
+)
+class MinorMedicalDocumentPageLabResultsView(MedicalDocumentPageLabResultsView):
+    def get_patient(self, request, **kwargs):
+        return authorized_minor_patient(request, self.kwargs["minor_uuid"])
+
+
+@extend_schema_view(
+    post=extend_schema(operation_id="minor_medical_document_page_date_confirm")
+)
+class MinorMedicalDocumentPageDateConfirmationView(
+    MedicalDocumentPageDateConfirmationView
+):
+    def get_patient(self, request, **kwargs):
+        return authorized_minor_patient(request, self.kwargs["minor_uuid"])
 
 
 class ExtractedContentView(APIView):
@@ -875,9 +892,7 @@ class ExtractedContentView(APIView):
 
 
 @extend_schema_view(
-    get=extend_schema(
-        operation_id="minor_medical_document_extracted_content"
-    ),
+    get=extend_schema(operation_id="minor_medical_document_extracted_content"),
 )
 class MinorExtractedContentView(ExtractedContentView):
     """Guardian-scoped extracted content for an authorized minor's document."""

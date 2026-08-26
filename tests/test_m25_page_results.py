@@ -6,23 +6,29 @@ native-text page has no spans, page confirm-date (one leaves others pending,
 all aggregate parent + shared date), cross-page evidence isolation, legacy
 single-page behavior.
 """
+
 from datetime import date
 from unittest.mock import patch
 
 import pytest
 
-from django.conf import settings
-
-from documents.models import MedicalDocumentPage
 from documents.page_services import (
     detect_report_subtype,
     pending_page_units,
-    recalculate_document_processing_state,
 )
 from labs.models import LabReportExtraction, LabResult
-from processing.models import DateCandidate, DocumentText, DocumentTextPage, DocumentTextSpan
+from processing.models import (
+    DocumentText,
+    DocumentTextPage,
+    DocumentTextSpan,
+)
 from tests.archive_helpers import make_document
 from tests.test_medical_documents_api import patient_user
+from tests.test_minor_medical_documents_api import (
+    minor,
+    relationship,
+    verified_guardian,
+)
 
 pytestmark = pytest.mark.django_db
 
@@ -30,6 +36,12 @@ PAGE_URL = "/api/v1/documents/{uuid}/pages/{page}/"
 PAGE_LAB_URL = "/api/v1/documents/{uuid}/pages/{page}/lab-results/"
 PAGE_CONFIRM_URL = "/api/v1/documents/{uuid}/pages/{page}/confirm-date/"
 QUEUE = "/api/v1/documents/date-confirmations/pending/"
+MINOR_PAGE_LIST_URL = "/api/v1/minors/{minor}/documents/{uuid}/pages/"
+MINOR_PAGE_URL = "/api/v1/minors/{minor}/documents/{uuid}/pages/{page}/"
+MINOR_PAGE_LAB_URL = "/api/v1/minors/{minor}/documents/{uuid}/pages/{page}/lab-results/"
+MINOR_PAGE_CONFIRM_URL = (
+    "/api/v1/minors/{minor}/documents/{uuid}/pages/{page}/confirm-date/"
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -46,16 +58,12 @@ def test_subtype_chemistry():
 
 def test_subtype_hormones():
     assert (
-        detect_report_subtype("Vitamins\nVitamin D3 19.3\nTSH 1.24")
-        == "LAB_HORMONES"
+        detect_report_subtype("Vitamins\nVitamin D3 19.3\nTSH 1.24") == "LAB_HORMONES"
     )
 
 
 def test_subtype_cbc():
-    assert (
-        detect_report_subtype("CBC\nWBC 6.7\nHGB 14.6\nPLT 288")
-        == "LAB_CBC"
-    )
+    assert detect_report_subtype("CBC\nWBC 6.7\nHGB 14.6\nPLT 288") == "LAB_CBC"
 
 
 def test_shared_chemistry_header_does_not_dominate_cbc():
@@ -262,9 +270,7 @@ def test_lazy_ocr_produces_spans_when_native_text_has_none(api_client):
 
     with (
         patch("processing.services._read_verified_content", return_value=(b"x", None)),
-        patch(
-            "processing.ocr_provider.get_ocr_engine", return_value=_FakeEngine()
-        ),
+        patch("processing.ocr_provider.get_ocr_engine", return_value=_FakeEngine()),
         patch("processing.ocr.PDFPageRenderer", return_value=_FakeRenderer()),
     ):
         p1 = document.pages.get(page_number=1)
@@ -358,6 +364,67 @@ def test_page_detail_shows_status_and_candidates(api_client):
     assert data["report_subtype"] == "LAB_HORMONES"
     assert data["lab_result_count"] >= 1
     assert len(data["lab_results"]) == data["lab_result_count"]
+
+
+def test_verified_guardian_has_full_minor_page_route_parity(api_client):
+    guardian = verified_guardian(
+        email="m29-page-guardian@example.com",
+        digital_id="10000000000000291",
+    )
+    patient = minor(digital_id="30000000000000291")
+    relationship(guardian, patient)
+    document = make_pdf(guardian, patient)
+    finalize_pages(document)
+    api_client.force_authenticate(user=guardian)
+
+    values = {
+        "minor": patient.uuid,
+        "uuid": document.uuid,
+        "page": 1,
+    }
+    assert api_client.get(MINOR_PAGE_LIST_URL.format(**values)).status_code == 200
+    assert api_client.get(MINOR_PAGE_URL.format(**values)).status_code == 200
+    assert api_client.get(MINOR_PAGE_LAB_URL.format(**values)).status_code == 200
+    response = api_client.post(
+        MINOR_PAGE_CONFIRM_URL.format(**values),
+        {"date": "2026-06-30"},
+        format="json",
+    )
+    assert response.status_code == 200
+    assert response.data["data"]["page_number"] == 1
+
+
+@pytest.mark.parametrize(
+    "url_template",
+    [
+        MINOR_PAGE_LIST_URL,
+        MINOR_PAGE_URL,
+        MINOR_PAGE_LAB_URL,
+        MINOR_PAGE_CONFIRM_URL,
+    ],
+)
+def test_minor_page_routes_deny_unrelated_guardian(api_client, url_template):
+    owner = verified_guardian(
+        email="m29-page-owner@example.com",
+        digital_id="10000000000000292",
+    )
+    unrelated = verified_guardian(
+        email="m29-page-unrelated@example.com",
+        digital_id="10000000000000293",
+    )
+    patient = minor(digital_id="30000000000000292")
+    relationship(owner, patient)
+    document = make_pdf(owner, patient)
+    api_client.force_authenticate(user=unrelated)
+    values = {"minor": patient.uuid, "uuid": document.uuid, "page": 1}
+
+    if url_template == MINOR_PAGE_CONFIRM_URL:
+        response = api_client.post(
+            url_template.format(**values), {"date": "2026-06-30"}, format="json"
+        )
+    else:
+        response = api_client.get(url_template.format(**values))
+    assert response.status_code == 404
 
 
 def test_legacy_single_page_extraction_still_document_level():
