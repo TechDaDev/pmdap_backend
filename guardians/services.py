@@ -66,7 +66,7 @@ class GuardianApprovalEvaluation:
     minor_card: object | None
 
 
-EVIDENCE_POLICY_VERSION = "M29_3_V1"
+EVIDENCE_POLICY_VERSION = "M29_4_V1"
 _ARABIC_ALEF_TRANSLATION = str.maketrans({"أ": "ا", "إ": "ا", "آ": "ا"})
 _ARABIC_DIACRITICS = re.compile(r"[\u0640\u064B-\u0652\u0670]")
 
@@ -243,9 +243,9 @@ def can_approve_guardian_relationship(relationship, *, refresh=False):
             relationship.name_evidence_result
             == GuardianRelationship.NameEvidenceResult.MATCH
         ):
-            name_explanation = "Minor mother's name matches adult given name"
+            name_explanation = "Minor mother's name matches adult given name."
         else:
-            name_explanation = "Minor mother's name does not match adult given name"
+            name_explanation = "Minor mother's name does not match adult given name."
 
     reasons = []
     if (

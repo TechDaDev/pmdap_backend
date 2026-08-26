@@ -276,6 +276,26 @@ def test_mother_name_not_invented_when_card_has_no_maternal_field():
     assert "mother_name" not in fields
 
 
+def test_client_cannot_override_computed_mother_evidence(api_client):
+    guardian, _, _ = create_verified_guardian()
+    payload = national_card_payload(
+        relationship="MOTHER",
+        document_number="MOTHER-OVERRIDE-CARD",
+        mother_name="SyntheticMother",
+    )
+    payload["mother_name_match"] = True
+
+    response = create_minor(
+        api_client,
+        guardian,
+        payload,
+        key="m29-4-client-evidence-override",
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "validation_error"
+
+
 def test_minor_create_persists_authoritative_mother_name(api_client):
     guardian, _, _ = create_verified_guardian()
     payload = national_card_payload(
@@ -461,7 +481,7 @@ def test_mother_evidence_policy_version_bumped(api_client):
     _, _, _, relationship = _evaluated_mother(api_client)
     relationship.refresh_from_db()
     assert relationship.evidence_policy_version == EVIDENCE_POLICY_VERSION
-    assert EVIDENCE_POLICY_VERSION == "M29_3_V1"
+    assert EVIDENCE_POLICY_VERSION == "M29_4_V1"
 
 
 # --------------------------------------------------------------------------- #

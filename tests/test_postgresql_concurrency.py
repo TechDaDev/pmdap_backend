@@ -113,7 +113,7 @@ def test_concurrent_duplicate_guardian_approvals_are_consistent():
     from identities.services import approve_identity_document
 
     guardian, guardian_profile, agent = create_verified_guardian()
-    payload = national_card_payload()
+    payload = national_card_payload(mother_name=guardian_profile.given_name)
     payload.pop("family_number")
     serializer = MinorCreateSerializer(data=payload)
     assert serializer.is_valid(), serializer.errors

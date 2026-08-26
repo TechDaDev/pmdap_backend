@@ -110,6 +110,45 @@ def test_paternal_not_maternal_grandfather():
     assert "MATERNALGRAND" not in [f["value"] for f in fields.values()]
 
 
+def test_mother_name_split_line_label_then_value():
+    lines = [
+        extraction.SideLine("FRONT", "الاسم اناو TESTNAME", 0.9),
+        extraction.SideLine("FRONT", "اباوك TESTFATHER", 0.9),
+        extraction.SideLine("FRONT", "ابابيرTESTGRAND", 0.9),
+        extraction.SideLine("FRONT", "الام", 0.9),
+        extraction.SideLine("FRONT", "TESTMOTHER", 0.9),
+        extraction.SideLine("FRONT", "الجنس اركمز ذكر", 0.9),
+    ]
+
+    fields, _, _ = _run(lines)
+
+    assert fields["mother_name"]["value"] == "TESTMOTHER"
+
+
+@pytest.mark.parametrize(
+    "next_line",
+    (
+        "الجنسية عراقية",
+        "فصيلة الدم O+",
+        "123456789012",
+        "H12345678",
+    ),
+)
+def test_mother_split_line_rejects_non_name_administrative_values(next_line):
+    lines = [
+        extraction.SideLine("FRONT", "الاسم اناو TESTNAME", 0.9),
+        extraction.SideLine("FRONT", "اباوك TESTFATHER", 0.9),
+        extraction.SideLine("FRONT", "ابابيرTESTGRAND", 0.9),
+        extraction.SideLine("FRONT", "الام", 0.9),
+        extraction.SideLine("FRONT", next_line, 0.9),
+        extraction.SideLine("FRONT", "الجنس اركمز ذكر", 0.9),
+    ]
+
+    fields, _, _ = _run(lines)
+
+    assert "mother_name" not in fields
+
+
 def test_father_label_alone_ignored():
     # A bare "الاب" label line must not swallow a later name value.
     lines = [

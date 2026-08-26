@@ -154,6 +154,18 @@ _FATHER_LABELS = ("الاب", "اباوك", "باوك", "بابك", "بابه", 
 _GRANDFATHER_LABELS = ("ابابير", "ابير", "الحد", "الجد", "باپير", "اباير")
 _MOTHER_LABELS = ("الام", "ادايك", "ردايك", "داتك", "مادر")
 _SEX_LABELS = ("الجنس", "اركمز", "اركز", "ارهگهز")
+_NON_NAME_LABELS = _SEX_LABELS + (
+    "الجنسية",
+    "القومية",
+    "فصيلة الدم",
+    "زمرة الدم",
+    "الرقم الوطني",
+    "رقم البطاقة",
+    "الرقم العائلي",
+    "الرقم العائلى",
+    "تاريخ الولادة",
+    "تأريخ الولادة",
+)
 _FAMILY_LABELS = (
     "الرقم العائلي",
     "الرقم العائلى",
@@ -268,6 +280,20 @@ def _classify_front_line(text: str) -> str | None:
     return None
 
 
+def _is_safe_name_value(text: str) -> bool:
+    """Fail closed when a split label is followed by non-name card data."""
+    value = _norm_ar(text).strip()
+    if not value or any(char.isdigit() for char in value):
+        return False
+    if _contains_any(value, _NON_NAME_LABELS):
+        return False
+    if _classify_front_line(value) is not None:
+        return False
+    if _BLOOD_RE.search(value.upper()):
+        return False
+    return any(char.isalpha() for char in value)
+
+
 def _match_front_field(front, labels):
     """Return (value, confidence) for the first line carrying a label.
 
@@ -310,7 +336,7 @@ def _parse_front_name_chain(front):
             father, father_conf = value, conf
         elif field == "grandfather" and grandfather is None:
             grandfather, grandfather_conf = value, conf
-        elif field == "mother" and mother is None:
+        elif field == "mother" and mother is None and _is_safe_name_value(value):
             mother, mother_conf = value, conf
 
     for text, conf in front:
@@ -648,7 +674,7 @@ def extract_iraqi_national_card(
     else:
         warnings.append(W_FIELD_MISSING)
 
-    # Deterministic maternal evidence (M29.3). Present only when the card
+    # Deterministic maternal evidence (M29.4). Present only when the card
     # front explicitly labels the mother's name; never guessed from OCR text.
     if mother_value:
         fields["mother_name"] = _candidate(

@@ -41,6 +41,11 @@ def synthetic_payload():
         "extractor_version": "identity-v1",
         "fields": {
             "name": {"value": "SYNTHNAME", "confidence": 0.9, "source": "FRONT_PRINTED"},
+            "mother_name": {
+                "value": "SYNTHMOTHER",
+                "confidence": 0.9,
+                "source": "FRONT_PRINTED",
+            },
             "national_card_number": {
                 "value": "999999999999",
                 "confidence": 0.95,
@@ -91,6 +96,7 @@ def confirmed_identity(job_id, token):
         "name": "SYNTHNAME",
         "father_name": "SYNTHFATHER",
         "grandfather_name": "SYNTHGRANDFATHER",
+        "mother_name": "SYNTHMOTHER",
         "confirmation": True,
         "date_of_birth": "1990-05-17",
         "sex": "MALE",
@@ -432,6 +438,7 @@ def test_scan_first_register_full_lifecycle(api_client):
     assert profile.given_name == "SYNTHNAME"
     assert profile.father_name == "SYNTHFATHER"
     assert profile.grandfather_name == "SYNTHGRANDFATHER"
+    assert profile.mother_name == "SYNTHMOTHER"
     assert profile.governorate == "BAGHDAD"
 
     doc = IdentityDocument.objects.get(patient=profile)
