@@ -140,6 +140,9 @@ def national_card_payload(**overrides):
         "back_image": image_upload("child-back.png"),
     }
     payload.update(overrides)
+    if payload["relationship"] == "FATHER":
+        payload.setdefault("father_name", "Layla Hassan")
+        payload.setdefault("grandfather_name", "Kareem Ali")
     return payload
 
 

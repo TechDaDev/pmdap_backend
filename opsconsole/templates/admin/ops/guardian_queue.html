@@ -3,7 +3,7 @@
 {% block content %}
 <h1>{% translate 'Guardian verification queue' %}</h1>
 <p class="quiet">{% translate 'Pending relationships, oldest first. Identity numbers, dates of birth, and family numbers are not shown.' %}</p>
-{% if relationships %}<table id="result_list"><thead><tr><th>Submitted</th><th>Relationship</th><th>Adult Digital ID</th><th>Minor Digital ID</th><th>Family evidence</th><th>Supporting name evidence</th><th>Official evidence files</th><th></th></tr></thead><tbody>
-{% for row in relationships %}<tr><td>{{ row.created_at|date:"Y-m-d H:i" }}</td><td>{{ row.get_relationship_display }}</td><td>{{ row.guardian_user.patient_profile.digital_id }}</td><td>{{ row.minor_patient.digital_id }}</td><td>{{ row.get_family_number_result_display }}</td><td>{{ row.get_name_evidence_result_display }}</td><td>{{ row.evidences.count }}</td><td><a class="button" href="{% url 'admin:ops_guardian_review' row.pk %}">Review</a></td></tr>{% endfor %}
-</tbody></table>{% else %}<p>No pending guardian relationships.</p>{% endif %}
+{% if relationships %}<div style="overflow-x:auto"><table id="result_list"><thead><tr><th>Submitted</th><th>Relationship</th><th>Adult</th><th>Minor</th><th>Family evidence</th><th>Supporting name evidence</th><th>Official evidence files</th><th>Readiness</th><th></th></tr></thead><tbody>
+{% for row in relationships %}<tr><td>{{ row.created_at|date:"Y-m-d H:i" }}</td><td>{{ row.get_relationship_display }}</td><td>{{ row.guardian_user.patient_profile.full_name }}</td><td>{{ row.minor_patient.full_name }}</td><td>{{ row.get_family_number_result_display }}</td><td>{{ row.get_name_evidence_result_display }}</td><td>{{ row.evidences.count }}</td><td>{% if row.approval_evaluation.eligible %}<strong>Ready for review</strong>{% else %}<strong>Evidence incomplete</strong>{% endif %}</td><td><a class="button" href="{% url 'admin:ops_guardian_review' row.pk %}">Review</a></td></tr>{% endfor %}
+</tbody></table></div>{% else %}<p>No pending guardian relationships.</p>{% endif %}
 {% endblock %}

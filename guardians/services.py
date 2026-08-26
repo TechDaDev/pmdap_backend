@@ -45,6 +45,23 @@ class MinorCreationResult:
     created: bool
 
 
+@dataclass(frozen=True)
+class GuardianApprovalEvaluation:
+    eligible: bool
+    code: str
+    reasons: tuple[str, ...]
+    adult_identity_verified: bool
+    minor_identity_verified: bool
+    age_valid: bool
+    family_result: str
+    family_explanation: str
+    name_result: str
+    name_explanation: str
+    official_evidence_present: bool
+    adult_card: object | None
+    minor_card: object | None
+
+
 EVIDENCE_POLICY_VERSION = "M27_V1"
 
 
@@ -92,7 +109,14 @@ def evaluate_relationship_evidence(relationship, *, save=True):
                 else GuardianRelationship.FamilyNumberResult.MISMATCH
             )
     name_result = GuardianRelationship.NameEvidenceResult.UNAVAILABLE
-    if relationship.relationship == GuardianRelationship.Relationship.FATHER:
+    if (
+        relationship.relationship == GuardianRelationship.Relationship.FATHER
+        and guardian_card
+        and minor_card
+        and guardian_profile.identity_status == PatientProfile.IdentityStatus.VERIFIED
+        and relationship.minor_patient.identity_status
+        == PatientProfile.IdentityStatus.VERIFIED
+    ):
         guardian_name = _normalize_name(guardian_profile.full_name)
         father_name = _normalize_name(relationship.minor_patient.father_name)
         if guardian_name and father_name:
@@ -120,6 +144,139 @@ def evaluate_relationship_evidence(relationship, *, save=True):
             )
         )
     return relationship
+
+
+def can_approve_guardian_relationship(relationship, *, refresh=False):
+    """Return the single fail-closed approval verdict used by UI and service."""
+    evaluate_relationship_evidence(relationship, save=refresh)
+    adult = relationship.guardian_user.patient_profile
+    minor = relationship.minor_patient
+    adult_card = relationship.guardian_identity_document
+    minor_card = relationship.minor_identity_document
+    adult_verified = bool(
+        relationship.guardian_user.role == User.Role.PATIENT
+        and relationship.guardian_user.status == User.Status.ACTIVE
+        and relationship.guardian_user.is_active
+        and not adult.is_minor
+        and adult.identity_status == PatientProfile.IdentityStatus.VERIFIED
+        and adult_card
+    )
+    minor_verified = bool(
+        minor.identity_status == PatientProfile.IdentityStatus.VERIFIED and minor_card
+    )
+    age_valid = minor.is_minor
+    official_evidence_present = relationship.evidences.exists()
+
+    if not adult_card:
+        family_explanation = "Unavailable — adult has no verified current National Card"
+    elif not minor_card:
+        family_explanation = "Unavailable — minor has no verified current National Card"
+    elif not normalize_family_number(adult_card.family_number):
+        family_explanation = (
+            "Unavailable — adult verified card does not contain Family number"
+        )
+    elif not normalize_family_number(minor_card.family_number):
+        family_explanation = (
+            "Unavailable — Family number was not captured for the minor"
+        )
+    elif (
+        relationship.family_number_result
+        == GuardianRelationship.FamilyNumberResult.MATCH
+    ):
+        family_explanation = "Match — verified current National Cards"
+    else:
+        family_explanation = "Mismatch — verified current National Cards"
+
+    if relationship.relationship != GuardianRelationship.Relationship.FATHER:
+        name_explanation = "Not required for this relationship type"
+    elif not adult_verified or not minor_verified:
+        name_explanation = "Unavailable — identity is not verified"
+    elif not _normalize_name(adult.full_name):
+        name_explanation = "Unavailable — verified adult name data missing"
+    elif not _normalize_name(minor.father_name):
+        name_explanation = "Unavailable — verified father-name data missing"
+    elif (
+        relationship.name_evidence_result
+        == GuardianRelationship.NameEvidenceResult.MATCH
+    ):
+        name_explanation = "Match — verified identity names"
+    else:
+        name_explanation = "Mismatch — verified identity names"
+
+    reasons = []
+    if (
+        relationship.verification_status
+        != GuardianRelationship.VerificationStatus.PENDING
+    ):
+        reasons.append("Request is not pending.")
+    if not adult_verified:
+        reasons.append("Adult identity must be verified before approval.")
+    if not minor_verified:
+        reasons.append("Minor identity must be verified before approval.")
+    if not age_valid:
+        reasons.append("The patient must be under 18 at approval time.")
+    if relationship.relationship in {
+        GuardianRelationship.Relationship.FATHER,
+        GuardianRelationship.Relationship.MOTHER,
+    }:
+        if (
+            relationship.family_number_result
+            != GuardianRelationship.FamilyNumberResult.MATCH
+        ):
+            reasons.append("Verified family evidence must match before approval.")
+        if (
+            relationship.relationship == GuardianRelationship.Relationship.FATHER
+            and relationship.name_evidence_result
+            != GuardianRelationship.NameEvidenceResult.MATCH
+        ):
+            reasons.append("Verified father-name evidence must match before approval.")
+    elif not official_evidence_present:
+        reasons.append("Official guardianship evidence is required before approval.")
+
+    if not reasons:
+        code = "ELIGIBLE"
+    elif not minor_verified:
+        code = "NOT_ELIGIBLE_MINOR_NOT_VERIFIED"
+    elif not adult_verified:
+        code = "NOT_ELIGIBLE_ADULT_NOT_VERIFIED"
+    elif not age_valid:
+        code = "NOT_ELIGIBLE_AGE"
+    elif (
+        relationship.relationship
+        in {
+            GuardianRelationship.Relationship.FATHER,
+            GuardianRelationship.Relationship.MOTHER,
+        }
+        and relationship.family_number_result
+        != GuardianRelationship.FamilyNumberResult.MATCH
+    ):
+        code = "NOT_ELIGIBLE_FAMILY_EVIDENCE"
+    elif (
+        relationship.relationship == GuardianRelationship.Relationship.FATHER
+        and relationship.name_evidence_result
+        != GuardianRelationship.NameEvidenceResult.MATCH
+    ):
+        code = "NOT_ELIGIBLE_FATHER_NAME_EVIDENCE"
+    elif not official_evidence_present:
+        code = "NOT_ELIGIBLE_OFFICIAL_EVIDENCE"
+    else:
+        code = "NOT_ELIGIBLE_REQUEST_STATE"
+
+    return GuardianApprovalEvaluation(
+        eligible=not reasons,
+        code=code,
+        reasons=tuple(reasons),
+        adult_identity_verified=adult_verified,
+        minor_identity_verified=minor_verified,
+        age_valid=age_valid,
+        family_result=relationship.family_number_result,
+        family_explanation=family_explanation,
+        name_result=relationship.name_evidence_result,
+        name_explanation=name_explanation,
+        official_evidence_present=official_evidence_present,
+        adult_card=adult_card,
+        minor_card=minor_card,
+    )
 
 
 def eligible_guardian_profile(user, *, for_update=False):
@@ -410,39 +567,9 @@ def approve_guardian_relationship(*, relationship, agent):
         ):
             raise GuardianRelationshipConflict()
         eligible_guardian_profile(relationship.guardian_user, for_update=True)
-        minor = PatientProfile.objects.select_for_update().get(
-            pk=relationship.minor_patient_id
-        )
-        if not minor.is_minor:
-            raise GuardianRelationshipConflict()
-        if not IdentityDocument.objects.filter(
-            patient=minor,
-            document_type__in=(
-                IdentityDocument.DocumentType.UNIFIED_NATIONAL_CARD,
-                IdentityDocument.DocumentType.BIRTH_DOCUMENT,
-            ),
-            status=IdentityDocument.LifecycleStatus.CURRENT,
-            verification_status=IdentityDocument.VerificationStatus.VERIFIED,
-        ).exists():
-            raise GuardianRelationshipConflict()
-        if minor.identity_status != PatientProfile.IdentityStatus.VERIFIED:
-            raise GuardianRelationshipConflict()
-        evaluate_relationship_evidence(relationship)
-        if (
-            relationship.relationship
-            in {
-                GuardianRelationship.Relationship.FATHER,
-                GuardianRelationship.Relationship.MOTHER,
-            }
-            and relationship.family_number_result
-            != GuardianRelationship.FamilyNumberResult.MATCH
-        ):
-            raise GuardianRelationshipConflict()
-        if (
-            relationship.relationship
-            == GuardianRelationship.Relationship.LEGAL_GUARDIAN
-            and not relationship.evidences.exists()
-        ):
+        PatientProfile.objects.select_for_update().get(pk=relationship.minor_patient_id)
+        decision = can_approve_guardian_relationship(relationship, refresh=True)
+        if not decision.eligible:
             raise GuardianRelationshipConflict()
         relationship.verification_status = (
             GuardianRelationship.VerificationStatus.VERIFIED

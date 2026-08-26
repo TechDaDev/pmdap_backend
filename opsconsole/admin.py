@@ -53,6 +53,12 @@ class OpsAdminSite(AdminSite):
                 name="ops_guardian_reject",
             ),
             path(
+                "guardian-verification/<uuid:relationship_uuid>/evidence/"
+                "<uuid:evidence_uuid>/file/",
+                self.admin_view(guardian_views.guardian_evidence_file),
+                name="ops_guardian_evidence_file",
+            ),
+            path(
                 "identity-verification/",
                 self.admin_view(verification_views.verification_queue),
                 name="ops_verification_queue",
