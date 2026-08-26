@@ -7,6 +7,7 @@ from django.views.decorators.http import require_GET, require_POST
 from guardians.exceptions import GuardianRelationshipConflict
 from guardians.models import GuardianEvidence, GuardianRelationship
 from guardians.services import (
+    EVIDENCE_POLICY_VERSION,
     approve_guardian_relationship,
     can_approve_guardian_relationship,
     reject_guardian_relationship,
@@ -84,7 +85,7 @@ def _pending_card(profile):
 def _identity_summary(profile, card):
     return {
         "name": profile.full_name,
-        "first_name": (profile.full_name or "").split(" ", 1)[0],
+        "first_name": profile.given_name,
         "father_name": profile.father_name,
         "grandfather_name": profile.grandfather_name,
         "sex": profile.get_sex_display(),
@@ -102,7 +103,10 @@ def _identity_summary(profile, card):
 def _render_review(request, relationship, *, status=200):
     adult = relationship.guardian_user.patient_profile
     minor = relationship.minor_patient
-    decision = can_approve_guardian_relationship(relationship)
+    decision = can_approve_guardian_relationship(
+        relationship,
+        refresh=relationship.evidence_policy_version != EVIDENCE_POLICY_VERSION,
+    )
     adult_pending_card = _pending_card(adult) if not decision.adult_card else None
     minor_pending_card = _pending_card(minor) if not decision.minor_card else None
     return render(

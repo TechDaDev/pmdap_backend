@@ -244,6 +244,7 @@ def finalize_scan_first_registration(
     profile = create_patient_profile(
         user=user,
         full_name=full_name,
+        given_name=name,
         father_name=father_name,
         grandfather_name=grandfather_name,
         governorate=governorate,

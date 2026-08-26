@@ -73,9 +73,9 @@ class PatientProfile(UUIDModel):
     )
     digital_id = models.CharField(max_length=17, unique=True, editable=False)
     full_name = models.CharField(max_length=255)
-    # Structured Iraqi patronymic components. Canonical; `full_name` is the
-    # deterministic join "name father grandfather" for existing app/UI
-    # expectations. Blank for legacy profiles created before Step 2.
+    # Structured Iraqi patronymic components. Canonical; `full_name` is only
+    # the deterministic display join "given father grandfather".
+    given_name = models.CharField(max_length=255, blank=True, default="")
     father_name = models.CharField(max_length=255, blank=True, default="")
     grandfather_name = models.CharField(max_length=255, blank=True, default="")
     # Current residence / registration governorate (Iraqi card flow).

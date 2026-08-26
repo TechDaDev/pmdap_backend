@@ -429,6 +429,7 @@ def test_scan_first_register_full_lifecycle(api_client):
     assert profile.blood_group == "O+"
     # Structured patronymic components + governorate persisted.
     assert profile.full_name == "SYNTHNAME SYNTHFATHER SYNTHGRANDFATHER"
+    assert profile.given_name == "SYNTHNAME"
     assert profile.father_name == "SYNTHFATHER"
     assert profile.grandfather_name == "SYNTHGRANDFATHER"
     assert profile.governorate == "BAGHDAD"
@@ -781,6 +782,7 @@ def test_arabic_names_alphanumeric_family_and_g_body_accepted(api_client):
     assert user.password != "StrongPass123!"
     profile = user.patient_profile
     assert profile.full_name == "اسماعيل عواد احمد"
+    assert profile.given_name == "اسماعيل"
     assert profile.father_name == "عواد"
     assert profile.grandfather_name == "احمد"
     assert profile.governorate == "NAJAF"

@@ -91,6 +91,7 @@ def test_minor_card_uses_structured_names_and_server_extraction(api_client):
     assert response.status_code == 201, response.data
     minor = patient_model().objects.exclude(pk=guardian_profile.pk).get()
     assert minor.full_name == "SyntheticGiven SyntheticFather SyntheticGrandfather"
+    assert minor.given_name == "SyntheticGiven"
     assert minor.father_name == "SyntheticFather"
     assert minor.grandfather_name == "SyntheticGrandfather"
     card = document_model().objects.get(patient=minor)

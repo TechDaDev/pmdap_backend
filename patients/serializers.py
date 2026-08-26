@@ -5,7 +5,15 @@ from rest_framework import serializers
 
 from patients.models import PatientProfile
 
-IDENTITY_FIELDS = {"full_name", "date_of_birth", "sex", "nationality"}
+IDENTITY_FIELDS = {
+    "full_name",
+    "given_name",
+    "father_name",
+    "grandfather_name",
+    "date_of_birth",
+    "sex",
+    "nationality",
+}
 
 
 class RejectUnknownFieldsMixin:

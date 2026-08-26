@@ -22,6 +22,7 @@ PROFILE_INPUT = {
 }
 GUARDIAN_PROFILE_INPUT = {
     "full_name": "Layla Hassan",
+    "given_name": "Layla Hassan",
     "date_of_birth": "1988-01-15",
     "sex": "FEMALE",
     "nationality": "IQ",

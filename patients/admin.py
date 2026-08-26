@@ -44,7 +44,15 @@ class PatientProfileAdmin(admin.ModelAdmin):
         if obj is not None and (
             obj.identity_status == PatientProfile.IdentityStatus.VERIFIED
         ):
-            for name in ("full_name", "date_of_birth", "sex", "nationality"):
+            for name in (
+                "full_name",
+                "given_name",
+                "father_name",
+                "grandfather_name",
+                "date_of_birth",
+                "sex",
+                "nationality",
+            ):
                 if name not in fields:
                     fields.append(name)
         return fields

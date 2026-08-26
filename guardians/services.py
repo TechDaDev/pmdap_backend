@@ -1,6 +1,7 @@
 import hashlib
 import json
 import re
+import unicodedata
 from dataclasses import dataclass
 from datetime import date
 
@@ -62,7 +63,9 @@ class GuardianApprovalEvaluation:
     minor_card: object | None
 
 
-EVIDENCE_POLICY_VERSION = "M27_V1"
+EVIDENCE_POLICY_VERSION = "M29_2_V1"
+_ARABIC_ALEF_TRANSLATION = str.maketrans({"أ": "ا", "إ": "ا", "آ": "ا"})
+_ARABIC_DIACRITICS = re.compile(r"[\u0640\u064B-\u0652\u0670]")
 
 
 def normalize_family_number(value):
@@ -70,7 +73,10 @@ def normalize_family_number(value):
 
 
 def _normalize_name(value):
-    return " ".join((value or "").split()).casefold()
+    normalized = unicodedata.normalize("NFKC", value or "")
+    normalized = normalized.translate(_ARABIC_ALEF_TRANSLATION)
+    normalized = _ARABIC_DIACRITICS.sub("", normalized)
+    return " ".join(normalized.split()).casefold()
 
 
 def _authoritative_card(profile):
@@ -117,7 +123,7 @@ def evaluate_relationship_evidence(relationship, *, save=True):
         and relationship.minor_patient.identity_status
         == PatientProfile.IdentityStatus.VERIFIED
     ):
-        guardian_name = _normalize_name(guardian_profile.full_name)
+        guardian_name = _normalize_name(guardian_profile.given_name)
         father_name = _normalize_name(relationship.minor_patient.father_name)
         if guardian_name and father_name:
             name_result = (
@@ -191,17 +197,17 @@ def can_approve_guardian_relationship(relationship, *, refresh=False):
         name_explanation = "Not required for this relationship type"
     elif not adult_verified or not minor_verified:
         name_explanation = "Unavailable — identity is not verified"
-    elif not _normalize_name(adult.full_name):
-        name_explanation = "Unavailable — verified adult name data missing"
-    elif not _normalize_name(minor.father_name):
-        name_explanation = "Unavailable — verified father-name data missing"
+    elif not _normalize_name(adult.given_name) or not _normalize_name(
+        minor.father_name
+    ):
+        name_explanation = "Authoritative father/given-name data is unavailable"
     elif (
         relationship.name_evidence_result
         == GuardianRelationship.NameEvidenceResult.MATCH
     ):
-        name_explanation = "Match — verified identity names"
+        name_explanation = "Minor father's name matches adult given name"
     else:
-        name_explanation = "Mismatch — verified identity names"
+        name_explanation = "Minor father's name does not match adult given name"
 
     reasons = []
     if (

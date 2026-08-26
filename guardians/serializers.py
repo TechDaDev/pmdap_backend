@@ -96,6 +96,7 @@ class MinorCreateSerializer(RejectUnknownFieldsMixin, serializers.Serializer):
                 attrs[field].strip()
                 for field in ("name", "father_name", "grandfather_name")
             )
+            attrs["given_name"] = attrs["name"].strip()
         elif not attrs.get("full_name"):
             raise serializers.ValidationError(
                 {"full_name": ["This field is required."]}
@@ -156,6 +157,7 @@ class MinorCreateSerializer(RejectUnknownFieldsMixin, serializers.Serializer):
                 key: attrs[key]
                 for key in (
                     "full_name",
+                    "given_name",
                     "father_name",
                     "grandfather_name",
                     "date_of_birth",
