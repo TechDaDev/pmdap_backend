@@ -1,7 +1,11 @@
 import pytest
 from django.urls import reverse
 
-from guardians.services import can_approve_guardian_relationship
+from guardians.exceptions import GuardianRelationshipConflict
+from guardians.services import (
+    approve_guardian_relationship,
+    can_approve_guardian_relationship,
+)
 from identities.services import approve_identity_document
 from tests.factories import UserFactory
 from tests.test_minors_guardians import (
@@ -18,10 +22,10 @@ from tests.test_minors_guardians import (
 pytestmark = pytest.mark.django_db
 
 
-def pending_father(api_client):
+def pending_parent(api_client, *, relationship_type="FATHER"):
     guardian, guardian_profile, agent = create_verified_guardian()
     payload = national_card_payload(
-        relationship="FATHER",
+        relationship=relationship_type,
         full_name="Noor Layla Kareem",
         father_name="Layla Hassan",
         grandfather_name="Kareem Ali",
@@ -42,7 +46,7 @@ def login_reviewer(client, agent):
 
 
 def test_owner_repro_disables_approve_and_post_is_blocked(api_client, client):
-    _, _, _, agent, relationship = pending_father(api_client)
+    _, _, _, agent, relationship = pending_parent(api_client)
     login_reviewer(client, agent)
     review_url = reverse("admin:ops_guardian_review", args=[relationship.pk])
 
@@ -60,7 +64,7 @@ def test_owner_repro_disables_approve_and_post_is_blocked(api_client, client):
 
 
 def test_safe_unavailable_reasons_and_identity_deep_link(api_client, client):
-    _, _, child_card, agent, relationship = pending_father(api_client)
+    _, _, child_card, agent, relationship = pending_parent(api_client)
     login_reviewer(client, agent)
 
     page = client.get(reverse("admin:ops_guardian_review", args=[relationship.pk]))
@@ -76,7 +80,7 @@ def test_safe_unavailable_reasons_and_identity_deep_link(api_client, client):
 def test_identity_approval_recomputes_and_enables_without_new_request(
     api_client, client
 ):
-    _, _, child_card, agent, relationship = pending_father(api_client)
+    _, _, child_card, agent, relationship = pending_parent(api_client)
     login_reviewer(client, agent)
     before_uuid = relationship.pk
 
@@ -94,7 +98,7 @@ def test_identity_approval_recomputes_and_enables_without_new_request(
 
 
 def test_queue_readiness_and_privacy(api_client, client):
-    guardian, _, child_card, agent, relationship = pending_father(api_client)
+    guardian, _, child_card, agent, relationship = pending_parent(api_client)
     login_reviewer(client, agent)
     page = client.get(reverse("admin:ops_guardian_queue"))
     rendered = page.content.decode()
@@ -108,7 +112,7 @@ def test_queue_readiness_and_privacy(api_client, client):
 
 
 def test_guardian_workstation_permissions(api_client, client):
-    _, _, _, agent, relationship = pending_father(api_client)
+    _, _, _, agent, relationship = pending_parent(api_client)
     url = reverse("admin:ops_guardian_review", args=[relationship.pk])
 
     ordinary = UserFactory(is_staff=True, role="ADMIN", status="ACTIVE")
@@ -158,3 +162,35 @@ def test_private_official_evidence_is_scoped_and_reviewer_only(api_client, clien
         args=[other_relationship.pk, evidence.pk],
     )
     assert client.get(crossed).status_code == 404
+
+
+def test_mother_family_mismatch_is_denied(api_client):
+    _, _, child_card, agent, relationship = pending_parent(
+        api_client, relationship_type="MOTHER"
+    )
+    child_card.family_number = "DIFFERENT-SYNTHETIC-FAMILY"
+    child_card.save(update_fields=("family_number", "updated_at"))
+    approve_identity_document(document=child_card, agent=agent)
+    relationship.refresh_from_db()
+
+    decision = can_approve_guardian_relationship(relationship)
+
+    assert decision.eligible is False
+    assert decision.code == "NOT_ELIGIBLE_FAMILY_EVIDENCE"
+    with pytest.raises(GuardianRelationshipConflict):
+        approve_guardian_relationship(relationship=relationship, agent=agent)
+
+
+def test_father_name_mismatch_is_denied(api_client):
+    _, minor, child_card, agent, relationship = pending_parent(api_client)
+    minor.father_name = "Different Synthetic Adult"
+    minor.save(update_fields=("father_name", "updated_at"))
+    approve_identity_document(document=child_card, agent=agent)
+    relationship.refresh_from_db()
+
+    decision = can_approve_guardian_relationship(relationship)
+
+    assert decision.eligible is False
+    assert decision.code == "NOT_ELIGIBLE_FATHER_NAME_EVIDENCE"
+    with pytest.raises(GuardianRelationshipConflict):
+        approve_guardian_relationship(relationship=relationship, agent=agent)
