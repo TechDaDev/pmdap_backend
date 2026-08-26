@@ -129,21 +129,33 @@ def test_unverified_adult_or_minor_is_unavailable_and_blocked(api_client):
         approve_guardian_relationship(relationship=relationship, agent=agent)
 
 
-def test_mother_policy_does_not_require_father_name_match(api_client):
+def test_mother_policy_never_uses_father_name(api_client):
+    """M29.3: MOTHER evidence ignores father_name entirely.
+
+    A MOTHER relationship whose father name matches the adult but whose
+    maternal evidence is unavailable must be DENIED — father evidence can never
+    substitute for mother evidence.
+    """
     guardian, minor, child_card, agent, relationship = pending_parent(
         api_client, relationship_type="MOTHER"
     )
     guardian.patient_profile.given_name = "Different Adult Given"
     guardian.patient_profile.save(update_fields=("given_name", "updated_at"))
     minor.father_name = "Unrelated Father Name"
-    minor.save(update_fields=("father_name", "updated_at"))
+    minor.mother_name = ""
+    minor.save(update_fields=("father_name", "mother_name", "updated_at"))
     approve_identity_document(document=child_card, agent=agent)
     relationship.refresh_from_db()
 
     decision = can_approve_guardian_relationship(relationship)
 
+    assert decision.name_evidence_kind == "MOTHER"
     assert decision.name_result == "UNAVAILABLE"
-    assert decision.eligible is True
+    # Father evidence must never unlock a mother relationship.
+    assert decision.eligible is False
+    assert decision.code == "NOT_ELIGIBLE_MOTHER_NAME_EVIDENCE"
+    with pytest.raises(GuardianRelationshipConflict):
+        approve_guardian_relationship(relationship=relationship, agent=agent)
 
 
 def test_stale_pending_evidence_recomputes_and_persists_on_review(api_client, client):

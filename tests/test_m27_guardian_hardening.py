@@ -32,6 +32,10 @@ def _pending_parent(api_client, *, relationship="FATHER", child_family="FAM-100"
     child_card = document_model().objects.get(patient=minor)
     child_card.family_number = child_family
     child_card.save(update_fields=("family_number", "updated_at"))
+    if relationship == "MOTHER":
+        # M29.3: provide authoritative maternal evidence for MOTHER approval.
+        minor.mother_name = guardian.patient_profile.given_name
+        minor.save(update_fields=("mother_name", "updated_at"))
     from identities.services import approve_identity_document
 
     approve_identity_document(document=child_card, agent=agent)

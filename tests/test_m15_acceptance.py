@@ -238,6 +238,10 @@ def test_parent_minor_lifecycle(api_client, tmp_path):
     minor_card.save(update_fields=("family_number", "updated_at"))
     approve_id(document=minor_card, agent=agent)
     relationship = GuardianRelationship.objects.get(minor_patient=minor)
+    if relationship.relationship == GuardianRelationship.Relationship.MOTHER:
+        # M29.3: provide authoritative maternal evidence for MOTHER approval.
+        minor.mother_name = guardian.patient_profile.given_name
+        minor.save(update_fields=("mother_name", "updated_at"))
     approve_guardian_relationship(relationship=relationship, agent=agent)
 
     with override_settings(MEDICAL_FILE_ROOT=tmp_path):

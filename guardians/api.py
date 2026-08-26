@@ -29,6 +29,7 @@ from guardians.services import (
     approve_guardian_relationship,
     authorized_guardian_relationship,
     create_minor,
+    dismiss_guardian_relationship,
     eligible_guardian_profile,
     reject_guardian_relationship,
     revoke_guardian_relationship,
@@ -114,6 +115,17 @@ def patient_relationship(user, relationship_uuid):
 class GuardianRelationshipPatientCollectionView(APIView):
     @extend_schema(
         operation_id="guardian_relationship_list",
+        parameters=[
+            OpenApiParameter(
+                name="include_history",
+                type=bool,
+                required=False,
+                description=(
+                    "Set true to include guardian-dismissed rejected/revoked "
+                    "rows. Default hides them from the active My Children list."
+                ),
+            )
+        ],
         responses={
             200: paginated_envelope(
                 "GuardianRelationshipList",
@@ -124,11 +136,18 @@ class GuardianRelationshipPatientCollectionView(APIView):
         tags=["Minors and guardians"],
     )
     def get(self, request):
-        relationships = GuardianRelationship.objects.filter(
+        queryset = GuardianRelationship.objects.filter(
             guardian_user=request.user
         ).select_related("minor_patient")
+        include_history = (
+            request.query_params.get("include_history", "").lower() == "true"
+        )
+        if not include_history:
+            # Patient-facing default: hide dismissed rejected/revoked rows.
+            # Dismissal never deletes the immutable row or its audit history.
+            queryset = queryset.filter(dismissed_by_guardian_at__isnull=True)
         return page_response(
-            request, relationships, GuardianRelationshipPatientSerializer
+            request, queryset, GuardianRelationshipPatientSerializer
         )
 
 
@@ -147,6 +166,39 @@ class GuardianRelationshipPatientDetailView(APIView):
     )
     def get(self, request, relationship_uuid):
         relationship = patient_relationship(request.user, relationship_uuid)
+        return Response(
+            {"data": GuardianRelationshipPatientSerializer(relationship).data}
+        )
+
+
+class GuardianRelationshipDismissView(APIView):
+    @extend_schema(
+        operation_id="guardian_relationship_dismiss",
+        request=EmptySerializer,
+        responses={
+            200: envelope(
+                "GuardianRelationshipDismissed",
+                GuardianRelationshipPatientSerializer(read_only=True),
+            ),
+            401: ErrorEnvelopeSerializer,
+            404: ErrorEnvelopeSerializer,
+            409: ErrorEnvelopeSerializer,
+        },
+        tags=["Minors and guardians"],
+    )
+    def post(self, request, relationship_uuid):
+        """Patient-facing dismissal of a rejected/revoked relationship row.
+
+        Only the owning guardian may dismiss. Idempotent; audit/event history
+        is preserved and the REJECTED/REVOKED status is never rewritten.
+        ACTIVE or PENDING relationships return 409.
+        """
+        relationship = patient_relationship(request.user, relationship_uuid)
+        serializer = EmptySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        relationship = dismiss_guardian_relationship(
+            relationship=relationship, guardian=request.user
+        )
         return Response(
             {"data": GuardianRelationshipPatientSerializer(relationship).data}
         )

@@ -23,6 +23,11 @@ class MinorCreateSerializer(RejectUnknownFieldsMixin, serializers.Serializer):
     grandfather_name = serializers.CharField(
         max_length=255, required=False, allow_blank=True
     )
+    # Authoritative confirmed mother's given name (card front maternal field).
+    # Used for MOTHER relationship evidence; never substituted by father name.
+    mother_name = serializers.CharField(
+        max_length=255, required=False, allow_blank=True, default=""
+    )
     date_of_birth = serializers.DateField()
     sex = serializers.ChoiceField(choices=PatientProfile.Sex.choices)
     nationality = serializers.CharField(min_length=2, max_length=2)
@@ -160,6 +165,7 @@ class MinorCreateSerializer(RejectUnknownFieldsMixin, serializers.Serializer):
                     "given_name",
                     "father_name",
                     "grandfather_name",
+                    "mother_name",
                     "date_of_birth",
                     "sex",
                     "nationality",
@@ -207,6 +213,10 @@ class GuardianRelationshipPatientSerializer(serializers.ModelSerializer):
     minor_patient = GuardianRelationshipChildSerializer(read_only=True)
     status = serializers.SerializerMethodField()
     can_revoke = serializers.SerializerMethodField()
+    can_dismiss = serializers.SerializerMethodField()
+    dismissed_at = serializers.DateTimeField(
+        source="dismissed_by_guardian_at", read_only=True
+    )
 
     class Meta:
         model = GuardianRelationship
@@ -216,6 +226,8 @@ class GuardianRelationshipPatientSerializer(serializers.ModelSerializer):
             "relationship",
             "status",
             "can_revoke",
+            "can_dismiss",
+            "dismissed_at",
             "started_at",
             "verified_at",
             "ended_at",
@@ -250,6 +262,17 @@ class GuardianRelationshipPatientSerializer(serializers.ModelSerializer):
             and obj.active
             and obj.verification_status
             == GuardianRelationship.VerificationStatus.VERIFIED
+        )
+
+    @extend_schema_field(serializers.BooleanField())
+    def get_can_dismiss(self, obj):
+        """Rejected/revoked rows may be dismissed; active/pending may not."""
+        if obj.active or obj.dismissed_by_guardian_at is not None:
+            return False
+        return (
+            obj.verification_status
+            == GuardianRelationship.VerificationStatus.REJECTED
+            or obj.ended_at is not None
         )
 
 

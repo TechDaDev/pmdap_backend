@@ -59,6 +59,10 @@ class AuditLog(UUIDModel):
             "GUARDIAN_RELATIONSHIP_ENDED",
             "Guardian relationship ended",
         )
+        GUARDIAN_RELATIONSHIP_DISMISSED = (
+            "GUARDIAN_RELATIONSHIP_DISMISSED",
+            "Guardian relationship dismissed",
+        )
         GUARDIAN_ACCESS_EXPIRED = (
             "GUARDIAN_ACCESS_EXPIRED",
             "Guardian access expired",

@@ -58,14 +58,32 @@ class GuardianApprovalEvaluation:
     family_explanation: str
     name_result: str
     name_explanation: str
+    # "FATHER" / "MOTHER" / None — which minor name field the evidence uses.
+    # Workstation must NOT show a father-name comparison for MOTHER.
+    name_evidence_kind: str | None
     official_evidence_present: bool
     adult_card: object | None
     minor_card: object | None
 
 
-EVIDENCE_POLICY_VERSION = "M29_2_V1"
+EVIDENCE_POLICY_VERSION = "M29_3_V1"
 _ARABIC_ALEF_TRANSLATION = str.maketrans({"أ": "ا", "إ": "ا", "آ": "ا"})
 _ARABIC_DIACRITICS = re.compile(r"[\u0640\u064B-\u0652\u0670]")
+
+
+def _name_evidence_source(relationship):
+    """Return a minor-field accessor used for name evidence, or None.
+
+    FATHER → minor.father_name (unchanged regression).
+    MOTHER → minor.mother_name (authoritative maternal given name; father's
+    name is NEVER substituted for maternal evidence).
+    LEGAL_GUARDIAN → None (official evidence + manual review only).
+    """
+    if relationship.relationship == GuardianRelationship.Relationship.FATHER:
+        return lambda minor: minor.father_name
+    if relationship.relationship == GuardianRelationship.Relationship.MOTHER:
+        return lambda minor: minor.mother_name
+    return None
 
 
 def normalize_family_number(value):
@@ -115,8 +133,9 @@ def evaluate_relationship_evidence(relationship, *, save=True):
                 else GuardianRelationship.FamilyNumberResult.MISMATCH
             )
     name_result = GuardianRelationship.NameEvidenceResult.UNAVAILABLE
+    name_source = _name_evidence_source(relationship)
     if (
-        relationship.relationship == GuardianRelationship.Relationship.FATHER
+        name_source is not None
         and guardian_card
         and minor_card
         and guardian_profile.identity_status == PatientProfile.IdentityStatus.VERIFIED
@@ -124,11 +143,11 @@ def evaluate_relationship_evidence(relationship, *, save=True):
         == PatientProfile.IdentityStatus.VERIFIED
     ):
         guardian_name = _normalize_name(guardian_profile.given_name)
-        father_name = _normalize_name(relationship.minor_patient.father_name)
-        if guardian_name and father_name:
+        minor_name = _normalize_name(name_source(relationship.minor_patient))
+        if guardian_name and minor_name:
             name_result = (
                 GuardianRelationship.NameEvidenceResult.MATCH
-                if guardian_name == father_name
+                if guardian_name == minor_name
                 else GuardianRelationship.NameEvidenceResult.MISMATCH
             )
     relationship.family_number_result = family_result
@@ -193,21 +212,40 @@ def can_approve_guardian_relationship(relationship, *, refresh=False):
     else:
         family_explanation = "Mismatch — verified current National Cards"
 
-    if relationship.relationship != GuardianRelationship.Relationship.FATHER:
-        name_explanation = "Not required for this relationship type"
-    elif not adult_verified or not minor_verified:
-        name_explanation = "Unavailable — identity is not verified"
-    elif not _normalize_name(adult.given_name) or not _normalize_name(
-        minor.father_name
-    ):
-        name_explanation = "Authoritative father/given-name data is unavailable"
-    elif (
-        relationship.name_evidence_result
-        == GuardianRelationship.NameEvidenceResult.MATCH
-    ):
-        name_explanation = "Minor father's name matches adult given name"
-    else:
-        name_explanation = "Minor father's name does not match adult given name"
+    name_explanation = "Not required for this relationship type"
+    name_evidence_kind = None
+    if relationship.relationship == GuardianRelationship.Relationship.FATHER:
+        name_evidence_kind = "FATHER"
+        if not adult_verified or not minor_verified:
+            name_explanation = "Unavailable — identity is not verified"
+        elif not _normalize_name(adult.given_name) or not _normalize_name(
+            minor.father_name
+        ):
+            name_explanation = "Authoritative father/given-name data is unavailable"
+        elif (
+            relationship.name_evidence_result
+            == GuardianRelationship.NameEvidenceResult.MATCH
+        ):
+            name_explanation = "Minor father's name matches adult given name"
+        else:
+            name_explanation = "Minor father's name does not match adult given name"
+    elif relationship.relationship == GuardianRelationship.Relationship.MOTHER:
+        name_evidence_kind = "MOTHER"
+        if not adult_verified or not minor_verified:
+            name_explanation = "Unavailable — identity is not verified"
+        elif not _normalize_name(adult.given_name) or not _normalize_name(
+            minor.mother_name
+        ):
+            name_explanation = (
+                "Verified maternal-name evidence is unavailable."
+            )
+        elif (
+            relationship.name_evidence_result
+            == GuardianRelationship.NameEvidenceResult.MATCH
+        ):
+            name_explanation = "Minor mother's name matches adult given name"
+        else:
+            name_explanation = "Minor mother's name does not match adult given name"
 
     reasons = []
     if (
@@ -236,6 +274,12 @@ def can_approve_guardian_relationship(relationship, *, refresh=False):
             != GuardianRelationship.NameEvidenceResult.MATCH
         ):
             reasons.append("Verified father-name evidence must match before approval.")
+        if (
+            relationship.relationship == GuardianRelationship.Relationship.MOTHER
+            and relationship.name_evidence_result
+            != GuardianRelationship.NameEvidenceResult.MATCH
+        ):
+            reasons.append("Verified mother-name evidence must match before approval.")
     elif not official_evidence_present:
         reasons.append("Official guardianship evidence is required before approval.")
 
@@ -263,6 +307,12 @@ def can_approve_guardian_relationship(relationship, *, refresh=False):
         != GuardianRelationship.NameEvidenceResult.MATCH
     ):
         code = "NOT_ELIGIBLE_FATHER_NAME_EVIDENCE"
+    elif (
+        relationship.relationship == GuardianRelationship.Relationship.MOTHER
+        and relationship.name_evidence_result
+        != GuardianRelationship.NameEvidenceResult.MATCH
+    ):
+        code = "NOT_ELIGIBLE_MOTHER_NAME_EVIDENCE"
     elif not official_evidence_present:
         code = "NOT_ELIGIBLE_OFFICIAL_EVIDENCE"
     else:
@@ -279,6 +329,7 @@ def can_approve_guardian_relationship(relationship, *, refresh=False):
         family_explanation=family_explanation,
         name_result=relationship.name_evidence_result,
         name_explanation=name_explanation,
+        name_evidence_kind=name_evidence_kind,
         official_evidence_present=official_evidence_present,
         adult_card=adult_card,
         minor_card=minor_card,
@@ -659,6 +710,59 @@ def revoke_guardian_relationship(*, relationship, actor, reason):
             resource_uuid=relationship.uuid,
             previous_values={"active": True},
             new_values={"active": False, "ended_reason": relationship.ended_reason},
+        )
+        return relationship
+
+
+def dismiss_guardian_relationship(*, relationship, guardian):
+    """Patient-facing dismissal of a rejected/revoked relationship row.
+
+    Pure presentation: hides the row from the default My Children list while
+    preserving the immutable relationship, its events, and its audit history.
+    The REJECTED/REVOKED status is never rewritten.
+
+    Rules:
+    - guardian must own the relationship (caller enforces ownership by query)
+    - status REJECTED or REVOKED (ended) only; ACTIVE and PENDING → conflict
+    - idempotent: dismissing an already-dismissed row is a no-op success
+    """
+    with transaction.atomic():
+        relationship = (
+            GuardianRelationship.objects.select_for_update()
+            .select_related("minor_patient")
+            .get(pk=relationship.pk)
+        )
+        if relationship.dismissed_by_guardian_at is not None:
+            return relationship
+        dismissible = (
+            relationship.verification_status
+            == GuardianRelationship.VerificationStatus.REJECTED
+            or relationship.ended_at is not None
+        )
+        if not dismissible or relationship.active:
+            raise GuardianRelationshipConflict()
+        relationship.dismissed_by_guardian_at = timezone.now()
+        relationship.save(
+            update_fields=("dismissed_by_guardian_at", "updated_at")
+        )
+        GuardianRelationshipEvent.objects.create(
+            relationship=relationship,
+            event_type=GuardianRelationshipEvent.EventType.DISMISSED,
+            actor=guardian,
+            metadata={},
+        )
+        record_audit(
+            action=AuditLog.Action.GUARDIAN_RELATIONSHIP_DISMISSED,
+            actor=guardian,
+            patient=relationship.minor_patient,
+            resource_type="GUARDIAN_RELATIONSHIP",
+            resource_uuid=relationship.uuid,
+            previous_values={"dismissed_by_guardian_at": None},
+            new_values={
+                "dismissed_by_guardian_at": (
+                    relationship.dismissed_by_guardian_at.isoformat()
+                )
+            },
         )
         return relationship
 

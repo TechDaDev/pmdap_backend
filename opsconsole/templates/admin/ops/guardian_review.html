@@ -46,6 +46,7 @@
       <tr><td>First name</td><td>{{ minor_summary.first_name|default:"Missing" }}</td><td>{{ minor_summary.profile_field_state }}</td></tr>
       <tr><td>Father's name</td><td>{{ minor_summary.father_name|default:"Missing" }}</td><td>{{ minor_summary.profile_field_state }}</td></tr>
       <tr><td>Grandfather's name</td><td>{{ minor_summary.grandfather_name|default:"Missing" }}</td><td>{{ minor_summary.profile_field_state }}</td></tr>
+      <tr><td>Mother's name</td><td>{{ minor_summary.mother_name|default:"Missing" }}</td><td>{{ minor_summary.profile_field_state }}</td></tr>
       <tr><td>DOB eligibility</td><td>{% if minor_summary.age_eligible %}Minor{% else %}Not eligible{% endif %}</td><td>{{ minor_summary.profile_field_state }}</td></tr>
       <tr><td>Sex</td><td>{{ minor_summary.sex }}</td><td>{{ minor_summary.profile_field_state }}</td></tr>
       <tr><td>Family number captured</td><td>{{ minor_summary.family_number_present|yesno:"Present,Missing" }}</td><td>{{ minor_summary.identifier_state }}</td></tr>
@@ -60,7 +61,10 @@
       <tr><td>Minor identity verified</td><td>{% if decision.minor_identity_verified %}<span class="gr-status gr-pass">✓ Pass</span>{% else %}<span class="gr-status gr-fail">✕ Missing</span>{% endif %}</td><td>Authoritative current National Card</td></tr>
       <tr><td>Age requirement</td><td>{% if decision.age_valid %}<span class="gr-status gr-pass">✓ Pass</span>{% else %}<span class="gr-status gr-fail">✕ Fail</span>{% endif %}</td><td>Live age check</td></tr>
       <tr><td>Family-number match</td><td><span class="gr-status {% if decision.family_result == 'MATCH' %}gr-pass{% elif decision.family_result == 'MISMATCH' %}gr-fail{% else %}gr-neutral{% endif %}">{{ decision.family_result|title }}</span></td><td>{{ decision.family_explanation }}</td></tr>
-      <tr><td>Father-name comparison</td><td><span class="gr-status {% if decision.name_result == 'MATCH' %}gr-pass{% elif decision.name_result == 'MISMATCH' %}gr-fail{% else %}gr-neutral{% endif %}">{{ decision.name_result|title }}</span></td><td>{{ decision.name_explanation }}</td></tr>
+      {% if decision.name_evidence_kind == 'MOTHER' %}<tr><td>Mother-name comparison</td><td><span class="gr-status {% if decision.name_result == 'MATCH' %}gr-pass{% elif decision.name_result == 'MISMATCH' %}gr-fail{% else %}gr-neutral{% endif %}">{{ decision.name_result|title }}</span></td><td>{{ decision.name_explanation }}</td></tr>
+      {% elif decision.name_evidence_kind == 'FATHER' %}<tr><td>Father-name comparison</td><td><span class="gr-status {% if decision.name_result == 'MATCH' %}gr-pass{% elif decision.name_result == 'MISMATCH' %}gr-fail{% else %}gr-neutral{% endif %}">{{ decision.name_result|title }}</span></td><td>{{ decision.name_explanation }}</td></tr>
+      {% else %}<tr><td>Name comparison</td><td><span class="gr-status gr-neutral">N/A</span></td><td>Not required for this relationship type</td></tr>
+      {% endif %}
       <tr><td>Official evidence</td><td>{% if relationship.relationship == 'LEGAL_GUARDIAN' %}{% if decision.official_evidence_present %}<span class="gr-status gr-pass">✓ Present</span>{% else %}<span class="gr-status gr-fail">✕ Missing</span>{% endif %}{% else %}<span class="gr-status gr-neutral">N/A</span>{% endif %}</td><td>{% if relationship.relationship == 'LEGAL_GUARDIAN' %}Required for manual review{% else %}Not required{% endif %}</td></tr>
     </tbody></table>
     <h3>{% translate "Private official evidence" %}</h3><ul>{% for evidence in relationship.evidences.all %}<li>{{ evidence.get_evidence_type_display }} — <a href="{% url 'admin:ops_guardian_evidence_file' relationship.pk evidence.pk %}" target="_blank" rel="noopener">Open private evidence</a></li>{% empty %}<li>{% if relationship.relationship == 'LEGAL_GUARDIAN' %}No official evidence files.{% else %}Not required.{% endif %}</li>{% endfor %}</ul>

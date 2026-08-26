@@ -78,6 +78,10 @@ class PatientProfile(UUIDModel):
     given_name = models.CharField(max_length=255, blank=True, default="")
     father_name = models.CharField(max_length=255, blank=True, default="")
     grandfather_name = models.CharField(max_length=255, blank=True, default="")
+    # Authoritative confirmed mother's given name (National Card maternal
+    # field). Used for MOTHER relationship evidence; never derived from the
+    # father's name.
+    mother_name = models.CharField(max_length=255, blank=True, default="")
     # Current residence / registration governorate (Iraqi card flow).
     governorate = models.CharField(
         max_length=32, choices=Governorate.choices, blank=True, default=""

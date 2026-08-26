@@ -88,6 +88,7 @@ def _identity_summary(profile, card):
         "first_name": profile.given_name,
         "father_name": profile.father_name,
         "grandfather_name": profile.grandfather_name,
+        "mother_name": profile.mother_name,
         "sex": profile.get_sex_display(),
         "age_eligible": profile.is_minor,
         "identity_status": profile.get_identity_status_display(),

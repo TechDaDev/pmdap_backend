@@ -123,6 +123,11 @@ class RegistrationIdentitySerializer(
     name = serializers.CharField(max_length=255)
     father_name = serializers.CharField(max_length=255)
     grandfather_name = serializers.CharField(max_length=255)
+    # Authoritative confirmed mother's given name (National Card maternal
+    # field). Optional at registration; required for MOTHER evidence later.
+    mother_name = serializers.CharField(
+        max_length=255, required=False, allow_blank=True, default=""
+    )
     # Explicit human acknowledgement that the confirmed values match the card.
     confirmation = serializers.BooleanField()
     date_of_birth = serializers.DateField()

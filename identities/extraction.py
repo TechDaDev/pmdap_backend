@@ -286,34 +286,64 @@ def _parse_front_name_chain(front):
     """Deterministic front-card name-section parser (state machine).
 
     Processes ordered FRONT lines: NAME → FATHER → PATERNAL GRANDFATHER →
-    SURNAME(ignored) → MOTHER(exit). Same-line and split-line (label line then
+    SURNAME(ignored) → MOTHER. Same-line and split-line (label line then
     value line) variants are handled. Only the paternal grandfather before the
     mother section populates grandfather_name; the maternal grandfather is
-    never captured.
+    never captured. Once the mother section begins, the first mother-labeled
+    value populates mother_name (deterministic maternal evidence for MOTHER
+    guardian relationships).
 
     Returns (name, name_conf, father, father_conf, grandfather,
-    grandfather_conf).
+    grandfather_conf, mother, mother_conf).
     """
-    name = father = grandfather = None
-    name_conf = father_conf = grandfather_conf = 0.0
+    name = father = grandfather = mother = None
+    name_conf = father_conf = grandfather_conf = mother_conf = 0.0
     paternal_section = True
     pending = None  # (field, label_set) awaiting a split-line value
 
     def capture(field, value, conf):
-        nonlocal name, father, grandfather, name_conf, father_conf, grandfather_conf
+        nonlocal name, father, grandfather, mother
+        nonlocal name_conf, father_conf, grandfather_conf, mother_conf
         if field == "name" and name is None:
             name, name_conf = value, conf
         elif field == "father" and father is None:
             father, father_conf = value, conf
         elif field == "grandfather" and grandfather is None:
             grandfather, grandfather_conf = value, conf
+        elif field == "mother" and mother is None:
+            mother, mother_conf = value, conf
 
     for text, conf in front:
         if _contains_any(text, _MOTHER_LABELS):
+            if not paternal_section:
+                # A later mother line is the actual value line when the first
+                # was only a label ("الام" alone). Capture it as mother only
+                # if no mother value was seen yet.
+                if mother is None:
+                    value = _value_after_label(text, _MOTHER_LABELS)
+                    if value:
+                        capture("mother", value, conf)
+                continue
             paternal_section = False
             pending = None
+            value = _value_after_label(text, _MOTHER_LABELS)
+            if value:
+                capture("mother", value, conf)
+            else:
+                pending = ("mother", _MOTHER_LABELS)
             continue
         if not paternal_section:
+            # Only a mother value line may follow the mother label; sex/other
+            # labeled lines never become a mother name.
+            if (
+                pending is not None
+                and pending[0] == "mother"
+                and not _contains_any(text, _SEX_LABELS)
+            ):
+                value = _value_after_label(text, ())
+                if value:
+                    capture("mother", value, conf)
+                pending = None
             continue
         field = _classify_front_line(text)
         if field is None:
@@ -331,7 +361,16 @@ def _parse_front_name_chain(front):
             pending = None
         else:
             pending = (field, _labels_for(field))
-    return name, name_conf, father, father_conf, grandfather, grandfather_conf
+    return (
+        name,
+        name_conf,
+        father,
+        father_conf,
+        grandfather,
+        grandfather_conf,
+        mother,
+        mother_conf,
+    )
 
 
 def _labels_for(field: str):
@@ -579,10 +618,17 @@ def extract_iraqi_national_card(
     elif not mrz_result.checks_passed or "MRZ_PARTIAL" in mrz_result.warnings:
         warnings.append(W_MRZ_PARTIAL)
 
-    # ---- name / father / grandfather (FRONT label-aware state machine) ----
-    name_value, name_conf, father_value, father_conf, grandfather_value, grandfather_conf = (
-        _parse_front_name_chain(front)
-    )
+    # ---- name / father / grandfather / mother (FRONT label-aware state machine)
+    (
+        name_value,
+        name_conf,
+        father_value,
+        father_conf,
+        grandfather_value,
+        grandfather_conf,
+        mother_value,
+        mother_conf,
+    ) = _parse_front_name_chain(front)
     if name_value:
         fields["name"] = _candidate(name_value, _clamp_conf(name_conf), SRC_FRONT)
     else:
@@ -601,6 +647,13 @@ def extract_iraqi_national_card(
         )
     else:
         warnings.append(W_FIELD_MISSING)
+
+    # Deterministic maternal evidence (M29.3). Present only when the card
+    # front explicitly labels the mother's name; never guessed from OCR text.
+    if mother_value:
+        fields["mother_name"] = _candidate(
+            mother_value, _clamp_conf(mother_conf), SRC_FRONT
+        )
 
     # ---- sex (FRONT printed + MRZ cross-check) ----
     sex_value, sex_conf = _match_front_field(front, _SEX_LABELS)

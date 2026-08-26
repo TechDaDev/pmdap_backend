@@ -98,6 +98,10 @@ class GuardianRelationship(UUIDModel):
     ended_reason = models.CharField(max_length=32, choices=EndedReason, blank=True)
     ended_reason_detail = models.TextField(blank=True)
     rejection_reason = models.TextField(blank=True)
+    # Patient-facing dismissal: hides a rejected/revoked row from the default
+    # My Children list WITHOUT deleting the immutable relationship/audit
+    # history. Rejection status is never rewritten.
+    dismissed_by_guardian_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ("-created_at", "-uuid")
@@ -163,6 +167,10 @@ class GuardianRelationshipEvent(UUIDModel):
         VERIFIED = "GUARDIAN_RELATIONSHIP_VERIFIED", "Relationship verified"
         REJECTED = "GUARDIAN_RELATIONSHIP_REJECTED", "Relationship rejected"
         ENDED = "GUARDIAN_RELATIONSHIP_ENDED", "Relationship ended"
+        DISMISSED = (
+            "GUARDIAN_RELATIONSHIP_DISMISSED",
+            "Relationship dismissed by guardian",
+        )
 
     relationship = models.ForeignKey(
         GuardianRelationship, on_delete=models.PROTECT, related_name="events"

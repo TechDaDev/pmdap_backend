@@ -236,6 +236,8 @@ def test_patient_relationship_list_returns_all_states_without_sensitive_fields(
             "relationship",
             "status",
             "can_revoke",
+            "can_dismiss",
+            "dismissed_at",
             "started_at",
             "verified_at",
             "ended_at",

@@ -19,6 +19,21 @@ from tests.test_minors_guardians import (
 )
 
 
+def _sync_mother_evidence(minor):
+    """M29.3: MOTHER approval needs authoritative maternal evidence.
+
+    The shared test helpers default to a MOTHER relationship; provide the
+    minor's mother name equal to the adult's given name so approval passes
+    under the strengthened policy.
+    """
+    relationship = relationship_model().objects.get(minor_patient=minor)
+    if relationship.relationship == "MOTHER":
+        adult_given = relationship.guardian_user.patient_profile.given_name
+        if adult_given:
+            minor.mother_name = adult_given
+            minor.save(update_fields=("mother_name", "updated_at"))
+
+
 def approve_minor_document(minor, agent):
     from identities.services import approve_identity_document, submit_identity_document
 
@@ -44,6 +59,7 @@ def approve_minor_document(minor, agent):
         )
         approve_identity_document(document=card, agent=agent)
     minor.refresh_from_db()
+    _sync_mother_evidence(minor)
     return document
 
 
@@ -386,6 +402,9 @@ def test_father_and_mother_can_be_verified_independently(api_client):
     mother_relationship = submit_guardian_relationship(
         guardian=mother, minor=minor, relationship_type="MOTHER"
     )
+    # M29.3: provide authoritative maternal evidence for the MOTHER approval.
+    minor.mother_name = mother.patient_profile.given_name
+    minor.save(update_fields=("mother_name", "updated_at"))
     auth(api_client, agent)
     response = api_client.post(
         f"{VERIFY_RELATIONSHIPS}{mother_relationship.uuid}/approve/",

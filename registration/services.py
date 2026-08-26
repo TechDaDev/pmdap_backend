@@ -239,6 +239,7 @@ def finalize_scan_first_registration(
     name = registration_identity["name"]
     father_name = registration_identity["father_name"]
     grandfather_name = registration_identity["grandfather_name"]
+    mother_name = registration_identity.get("mother_name", "")
     full_name = " ".join(p for p in (name, father_name, grandfather_name) if p)
 
     profile = create_patient_profile(
@@ -247,6 +248,7 @@ def finalize_scan_first_registration(
         given_name=name,
         father_name=father_name,
         grandfather_name=grandfather_name,
+        mother_name=mother_name,
         governorate=governorate,
         date_of_birth=registration_identity["date_of_birth"],
         sex=registration_identity["sex"],
