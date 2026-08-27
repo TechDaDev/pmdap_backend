@@ -160,7 +160,9 @@ class TestCollector:
         series = buffer.read_series("pmdap_backend", "CPU_USAGE")
         assert len(series) == 2
         assert series[0][1] == 0.5 and series[1][1] == 0.7
-        assert scheduled and scheduled[0] == 30  # reschedules at sample interval
+        # Exactly ONE successor per execution (never 2).
+        assert len(scheduled) == 1
+        assert scheduled[0] == 30  # reschedules at sample interval
 
     def test_disabled_returns_immediately(self, fake_redis, run_collector, monkeypatch):
         called = []
@@ -177,6 +179,7 @@ class TestCollector:
         assert status["status"] == "RATE_LIMITED"
         assert float(status["next_allowed_at"]) > time.time()
         # Backoff doubles the interval (30 -> 60).
+        assert len(scheduled) == 1
         assert scheduled[0] == 60
 
     def test_early_return_within_backoff_window(self, fake_redis, run_collector):
@@ -188,14 +191,28 @@ class TestCollector:
         # Must not hit upstream while cooling down.
         assert client.fetch_calls == 0
         assert client.discover_calls == 0
+        assert len(scheduled) == 1
         assert scheduled[0] == 60
 
+    def test_backoff_early_return_does_not_double_schedule(self, fake_redis, run_collector):
+        # Regression: the early return used to schedule inside try AND in the
+        # finally block -> 2 successors per execution -> exponential growth.
+        now = time.time()
+        buffer.set_collector_status(
+            status="RATE_LIMITED", next_allowed_at=now + 120, sample_seconds=30
+        )
+        client, scheduled = run_collector(FakeClient())
+        assert client.fetch_calls == 0
+        assert len(scheduled) == 1  # NOT 2
+        assert scheduled[0] == 120
+
     def test_config_error_status(self, fake_redis, run_collector):
-        client, _ = run_collector(
+        client, scheduled = run_collector(
             FakeClient(error=RailwayMetricsError("CONFIG_ERROR", "bad token"))
         )
         status = buffer.get_collector_status()
         assert status["status"] == "CONFIG_ERROR"
+        assert len(scheduled) == 1
 
     def test_redis_failure_does_not_crash_task(self, run_collector, monkeypatch):
         def boom(*args, **kwargs):
@@ -203,8 +220,8 @@ class TestCollector:
 
         monkeypatch.setattr(buffer, "redis_client", boom)
         client, scheduled = run_collector()
-        # Task still reschedules; no exception escaped.
-        assert scheduled
+        # Task still reschedules exactly once; no exception escaped.
+        assert len(scheduled) == 1
 
     def test_single_chain_guard(self, fake_redis):
         assert buffer.acquire_chain(60) is True

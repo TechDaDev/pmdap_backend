@@ -331,6 +331,17 @@ SPECTACULAR_SETTINGS = {
 
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/1")
+# Application polling NEVER reads the Celery result backend: every async flow
+# writes durable state to PostgreSQL (processing_status / job.status / lab
+# extraction rows) and identity/registration extraction results live in the
+# Django cache. Celery result keys in Redis are therefore pure overhead.
+#
+# Default ALL tasks to ignore_result (a per-task override still wins) so the
+# result backend cannot accumulate millions of dead keys again, and bound any
+# kept result TTL tightly. 6h is far above any polling window because nothing
+# polls the result backend at all.
+CELERY_TASK_IGNORE_RESULT = True
+CELERY_RESULT_EXPIRES = 6 * 60 * 60  # 6 hours
 CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 30 * 60
 CELERY_TIMEZONE = "Asia/Baghdad"

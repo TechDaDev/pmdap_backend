@@ -78,6 +78,7 @@ def _finish(job, *, status, error_code="", payload=None, keep_staging=False):
 @shared_task(
     name="identities.cleanup_identity_extraction_jobs",
     queue="ocr",
+    ignore_result=True,
 )
 def cleanup_identity_extraction_jobs(job_uuid=None):
     """Explicit expiry cleanup for identity extraction jobs.

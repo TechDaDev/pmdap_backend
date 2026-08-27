@@ -79,7 +79,7 @@ def _backoff(interval):
     return min(MAX_BACKOFF, max(get_sample_seconds(), interval * 2))
 
 
-@shared_task(name="ops.railway.collect_metrics", queue="celery")
+@shared_task(name="ops.railway.collect_metrics", queue="celery", ignore_result=True)
 def collect_railway_metrics():
     client = RailwayMetricsClient()
     if not client.enabled:
@@ -98,7 +98,9 @@ def collect_railway_metrics():
                 if now < float(next_allowed):
                     next_interval = max(1, float(next_allowed) - now)
                     buffer.renew_chain(chain_ttl())
-                    collect_railway_metrics.apply_async(countdown=int(next_interval))
+                    # NOTE: do NOT schedule here. The finally block below
+                    # schedules exactly ONE successor; scheduling here too
+                    # would spawn 2 tasks per execution (exponential growth).
                     return
             except (TypeError, ValueError):
                 pass

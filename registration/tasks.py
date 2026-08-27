@@ -157,7 +157,10 @@ def process_registration_identity_extraction(self, job_uuid):
     }
 
 
-@shared_task(name="registration.cleanup_registration_identity_jobs")
+@shared_task(
+    name="registration.cleanup_registration_identity_jobs",
+    ignore_result=True,
+)
 def cleanup_registration_identity_jobs(job_uuid=None):
     """Expire/cleanup a registration identity session (or sweep abandoned).
 
