@@ -103,6 +103,9 @@ class AuditLog(UUIDModel):
         OCR_FAILED = "OCR_FAILED", "OCR failed"
         INTEGRITY_FAILURE = "INTEGRITY_FAILURE", "Integrity failure"
 
+    SUPERUSER_ACCOUNT_PURGE_REQUESTED = "SUPERUSER_ACCOUNT_PURGE_REQUESTED"
+    SUPERUSER_ACCOUNT_PURGE_COMPLETED = "SUPERUSER_ACCOUNT_PURGE_COMPLETED"
+
     actor = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,

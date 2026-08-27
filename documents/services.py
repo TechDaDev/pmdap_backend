@@ -436,7 +436,11 @@ def purge_medical_document(*, document):
             document.document_text.delete()
         document.pages.all().delete()
         stored = document.stored_file
+        storage = stored.file.storage if stored else None
+        storage_name = stored.file.name if stored else ""
         document.delete()
         if stored:
             stored.delete()
+        if storage and storage_name:
+            transaction.on_commit(lambda: storage.delete(storage_name))
     return None

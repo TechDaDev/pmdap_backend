@@ -1,0 +1,32 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block content %}
+  <p>You are about to permanently remove private data for {{ previews|length }} user{{ previews|length|pluralize }}.</p>
+  <ul>
+    {% for preview in previews %}
+      <li>
+        {{ preview.target_uuid }} — {{ preview.email }}:
+        profiles {{ preview.counts.profiles }},
+        identity documents {{ preview.counts.identity_documents }},
+        medical documents {{ preview.counts.medical_documents }},
+        guardian relationships {{ preview.counts.guardian_relationships }}
+      </li>
+    {% endfor %}
+  </ul>
+  <form method="post">
+    {% csrf_token %}
+    {{ form.as_p }}
+    {% for object_id in selected %}
+      <input type="hidden" name="{{ action_checkbox_name }}" value="{{ object_id }}">
+    {% endfor %}
+    {% if is_bulk %}
+      <input type="hidden" name="action" value="system_purge_selected_users">
+      <input type="hidden" name="confirm_purge" value="yes">
+    {% endif %}
+    <div class="submit-row">
+      <a href="{% url 'admin:accounts_user_changelist' %}" class="button cancel-link">{% translate "Cancel" %}</a>
+      <input type="submit" value="{% translate 'Confirm purge' %}" class="deletelink">
+    </div>
+  </form>
+{% endblock %}
