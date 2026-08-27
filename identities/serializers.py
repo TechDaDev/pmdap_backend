@@ -2,7 +2,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils import timezone
 from rest_framework import serializers
 
-from identities.models import IdentityDocument
+from identities.models import IdentityDocument, IdentityFieldCorrection
 from identities.services import inspect_identity_upload
 
 
@@ -16,7 +16,9 @@ class RejectUnknownFieldsMixin:
         return super().to_internal_value(data)
 
 
-class IdentityExtractionRequestSerializer(RejectUnknownFieldsMixin, serializers.Serializer):
+class IdentityExtractionRequestSerializer(
+    RejectUnknownFieldsMixin, serializers.Serializer
+):
     """Advisory extraction request. No IdentityDocument is created."""
 
     EXTRACTABLE_TYPES = (
@@ -40,10 +42,11 @@ class IdentityExtractionRequestSerializer(RejectUnknownFieldsMixin, serializers.
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
-        if (
-            attrs["document_type"] == IdentityDocument.DocumentType.UNIFIED_NATIONAL_CARD
-            and not attrs.get("back_image")
-        ):
+        is_national_card = (
+            attrs["document_type"]
+            == IdentityDocument.DocumentType.UNIFIED_NATIONAL_CARD
+        )
+        if is_national_card and not attrs.get("back_image"):
             raise serializers.ValidationError(
                 {"back_image": ["A back image is required for a National Card."]}
             )
@@ -226,18 +229,110 @@ class VerificationPatientSerializer(serializers.Serializer):
     identity_status = serializers.CharField(read_only=True)
 
 
+class IdentityReviewFieldSerializer(serializers.Serializer):
+    """Per-field review state: original authoritative value, current reviewed
+    value (staged or original), and whether the reviewer corrected it."""
+
+    original = serializers.CharField(read_only=True)
+    reviewed = serializers.CharField(read_only=True)
+    corrected = serializers.BooleanField(read_only=True)
+
+
+class IdentityCorrectionProvenanceSerializer(serializers.Serializer):
+    """Safe correction provenance. Never carries field values."""
+
+    field = serializers.CharField(read_only=True)
+    source = serializers.CharField(read_only=True)
+    review_version = serializers.IntegerField(read_only=True)
+    corrected_by = serializers.UUIDField(read_only=True, allow_null=True)
+    corrected_at = serializers.DateTimeField(read_only=True)
+    reason_category = serializers.CharField(read_only=True)
+
+
 class VerificationQueueSerializer(IdentityDocumentSummarySerializer):
     patient = VerificationPatientSerializer(read_only=True)
+    has_corrections = serializers.BooleanField(read_only=True)
 
     class Meta(IdentityDocumentSummarySerializer.Meta):
-        fields = IdentityDocumentSummarySerializer.Meta.fields + ("patient",)
+        fields = IdentityDocumentSummarySerializer.Meta.fields + (
+            "patient",
+            "has_corrections",
+        )
+
+    def get_has_corrections(self, obj):
+        return obj.field_corrections.exists()
 
 
 class VerificationDetailSerializer(IdentityDocumentDetailSerializer):
     patient = VerificationPatientSerializer(read_only=True)
+    review_fields = serializers.SerializerMethodField()
+    review_version = serializers.IntegerField(read_only=True)
+    has_corrections = serializers.SerializerMethodField()
+    corrections = serializers.SerializerMethodField()
+    available_actions = serializers.SerializerMethodField()
 
     class Meta(IdentityDocumentDetailSerializer.Meta):
-        fields = IdentityDocumentDetailSerializer.Meta.fields + ("patient",)
+        fields = IdentityDocumentDetailSerializer.Meta.fields + (
+            "patient",
+            "review_fields",
+            "review_version",
+            "has_corrections",
+            "corrections",
+            "available_actions",
+        )
+
+    def get_has_corrections(self, obj):
+        return obj.field_corrections.exists()
+
+    def get_corrections(self, obj):
+        return [
+            {
+                "field": c.field,
+                "source": c.source,
+                "review_version": c.review_version,
+                "corrected_by": str(c.corrected_by_id) if c.corrected_by_id else None,
+                "corrected_at": c.corrected_at,
+                "reason_category": c.reason_category,
+            }
+            for c in obj.field_corrections.all()
+        ]
+
+    def get_review_fields(self, obj):
+        from identities.corrections import (
+            PROFILE_FIELDS,
+            REVIEWABLE_FIELDS,
+            _as_text,
+        )
+
+        profile = obj.patient
+        out = {}
+        for field in sorted(REVIEWABLE_FIELDS):
+            source = profile if field in PROFILE_FIELDS else obj
+            original = _as_text(getattr(source, field))
+            staged = getattr(obj, f"reviewed_{field}", None)
+            reviewed = _as_text(staged) if staged else original
+            out[field] = {
+                "original": original,
+                "reviewed": reviewed,
+                "corrected": reviewed != original,
+            }
+        return out
+
+    def get_available_actions(self, obj):
+        from identities.models import IdentityDocument
+
+        actions = []
+        if (
+            obj.verification_status == IdentityDocument.VerificationStatus.PENDING
+            and obj.status == IdentityDocument.LifecycleStatus.CURRENT
+        ):
+            actions.extend(["review_fields", "approve", "reject"])
+        if (
+            obj.verification_status == IdentityDocument.VerificationStatus.VERIFIED
+            and obj.status == IdentityDocument.LifecycleStatus.CURRENT
+        ):
+            actions.append("correct_verified")
+        return actions
 
 
 class VerificationQueueFilterSerializer(
@@ -255,6 +350,33 @@ class EmptySerializer(RejectUnknownFieldsMixin, serializers.Serializer):
 class RejectionSerializer(RejectUnknownFieldsMixin, serializers.Serializer):
     rejection_reason = serializers.CharField(
         min_length=1, max_length=1000, trim_whitespace=True
+    )
+
+
+class IdentityReviewFieldsSerializer(RejectUnknownFieldsMixin, serializers.Serializer):
+    """POST review-fields: reviewer corrections for a PENDING identity.
+
+    Only whitelisted structured identity fields are accepted; the domain
+    service re-validates every value and rejects any status/owner/audit field.
+    """
+
+    review_version = serializers.IntegerField()
+    fields = serializers.DictField()
+
+
+class VerifiedCorrectionSerializer(RejectUnknownFieldsMixin, serializers.Serializer):
+    """POST correct-verified: high-risk correction of a VERIFIED identity.
+
+    Requires a non-blank reason category; a note is optional and limited.
+    """
+
+    review_version = serializers.IntegerField()
+    fields = serializers.DictField()
+    reason_category = serializers.ChoiceField(
+        choices=IdentityFieldCorrection.ReasonCategory.choices
+    )
+    note = serializers.CharField(
+        required=False, allow_blank=True, default="", max_length=500
     )
 
 

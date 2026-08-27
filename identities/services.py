@@ -496,6 +496,28 @@ def approve_identity_document(*, document, agent):
         ):
             raise IdentityTransitionConflict()
 
+        # M29.5: promote staged reviewer-reviewed values to authoritative
+        # stores (PatientProfile structured fields + document number columns).
+        from identities.corrections import (
+            _apply_reviewed_to_authoritative,
+            _check_correction_conflicts,
+        )
+
+        changed_profile, changed_document = _apply_reviewed_to_authoritative(
+            document, profile
+        )
+        if changed_document:
+            _check_correction_conflicts(document, profile)
+        if changed_profile:
+            profile.save(
+                update_fields=tuple(changed_profile)
+                + ("full_name", "updated_at")
+            )
+        if changed_document:
+            document.save(
+                update_fields=tuple(changed_document) + ("updated_at",)
+            )
+
         document.verification_status = IdentityDocument.VerificationStatus.VERIFIED
         document.verified_by = agent
         document.verified_at = timezone.now()

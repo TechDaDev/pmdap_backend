@@ -5,6 +5,7 @@ from identities.models import (
     IdentityDocument,
     IdentityDocumentEvent,
     IdentityExtractionJob,
+    IdentityFieldCorrection,
     IdentityFile,
 )
 
@@ -81,6 +82,30 @@ class IdentityDocumentEventAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
     list_display = ("uuid", "document", "event_type", "actor", "created_at")
     list_filter = ("event_type",)
     readonly_fields = tuple(field.name for field in IdentityDocumentEvent._meta.fields)
+    list_per_page = 100
+
+
+@admin.register(IdentityFieldCorrection)
+class IdentityFieldCorrectionAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
+    """Read-only provenance journal for identity corrections.
+
+    Immutable by design; corrections only happen through the workstation /
+    domain service. Value columns are excluded from the list page.
+    """
+
+    list_display = (
+        "uuid",
+        "document",
+        "field",
+        "source",
+        "corrected_by",
+        "corrected_at",
+        "reason_category",
+    )
+    list_filter = ("source", "reason_category", "field")
+    readonly_fields = tuple(
+        field.name for field in IdentityFieldCorrection._meta.fields
+    )
     list_per_page = 100
 
 

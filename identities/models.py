@@ -55,6 +55,29 @@ class IdentityDocument(UUIDModel):
     issuing_country = models.CharField(max_length=2)
     issue_date = models.DateField(null=True, blank=True)
     expiry_date = models.DateField(null=True, blank=True)
+    # --- M29.5 reviewer-reviewed values (staged before approval) ---
+    # Structured profile fields (names/DOB/sex/blood/nationality) live
+    # authoritatively on PatientProfile; number fields live here. The reviewer
+    # edits staged reviewed_* copies so authoritative values only change on
+    # approval (or an explicit verified correction). An EMPTY value means "no
+    # correction staged" (show the original); a non-empty value is staged.
+    reviewed_given_name = models.CharField(max_length=255, blank=True, default="")
+    reviewed_father_name = models.CharField(max_length=255, blank=True, default="")
+    reviewed_grandfather_name = models.CharField(max_length=255, blank=True, default="")
+    reviewed_mother_name = models.CharField(max_length=255, blank=True, default="")
+    reviewed_date_of_birth = models.DateField(null=True, blank=True)
+    reviewed_sex = models.CharField(max_length=16, blank=True, default="")
+    reviewed_blood_group = models.CharField(max_length=7, blank=True, default="")
+    reviewed_nationality = models.CharField(max_length=2, blank=True, default="")
+    reviewed_document_number = models.CharField(max_length=128, blank=True, default="")
+    reviewed_national_number = models.CharField(max_length=128, blank=True, default="")
+    reviewed_family_number = models.CharField(max_length=128, blank=True, default="")
+    reviewed_unique_card_body_number = models.CharField(
+        max_length=128, blank=True, default=""
+    )
+    # Optimistic-concurrency version for reviewed-value writes. Every
+    # review-fields save increments it; clients must send the current version.
+    review_version = models.PositiveIntegerField(default=0)
     front_image = models.ForeignKey(
         IdentityFile,
         on_delete=models.PROTECT,
@@ -149,6 +172,14 @@ class IdentityDocumentEvent(UUIDModel):
         VERIFIED = "IDENTITY_VERIFIED", "Identity verified"
         REJECTED = "IDENTITY_REJECTED", "Identity rejected"
         REPLACED = "IDENTITY_DOCUMENT_REPLACED", "Identity document replaced"
+        REVIEW_FIELDS_CORRECTED = (
+            "IDENTITY_REVIEW_FIELDS_CORRECTED",
+            "Identity review fields corrected",
+        )
+        VERIFIED_FIELDS_CORRECTED = (
+            "IDENTITY_VERIFIED_FIELDS_CORRECTED",
+            "Identity verified fields corrected",
+        )
 
     document = models.ForeignKey(
         IdentityDocument,
@@ -175,6 +206,76 @@ class IdentityDocumentEvent(UUIDModel):
 
     def delete(self, *args, **kwargs):
         raise ValidationError("Identity document events are immutable.")
+
+
+class IdentityFieldCorrection(UUIDModel):
+    """Immutable provenance record for a corrected identity field.
+
+    Records the ORIGINAL authoritative value and the reviewed value per field
+    so corrected values are never falsely labelled as OCR-extracted. Used for
+    both pre-approval reviewer corrections and post-verification corrections.
+    """
+
+    class Source(models.TextChoices):
+        REVIEWER_CORRECTION = "REVIEWER_CORRECTION", "Reviewer correction"
+        VERIFIED_CORRECTION = "VERIFIED_CORRECTION", "Verified correction"
+
+    class ReasonCategory(models.TextChoices):
+        OCR_CORRECTION = (
+            "OCR_CORRECTION",
+            "OCR correction discovered after verification",
+        )
+        DATA_ENTRY = "DATA_ENTRY", "Data-entry correction"
+        UPDATED_DOCUMENT = (
+            "UPDATED_DOCUMENT",
+            "Updated authoritative identity document",
+        )
+        ADMINISTRATIVE = "ADMINISTRATIVE", "Administrative correction"
+        OTHER = "OTHER", "Other"
+
+    document = models.ForeignKey(
+        IdentityDocument,
+        on_delete=models.PROTECT,
+        related_name="field_corrections",
+    )
+    field = models.CharField(max_length=64)
+    original_value = models.TextField(blank=True, default="")
+    reviewed_value = models.TextField(blank=True, default="")
+    source = models.CharField(
+        max_length=32,
+        choices=Source,
+        default=Source.REVIEWER_CORRECTION,
+    )
+    review_version = models.PositiveIntegerField(default=0)
+    corrected_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="identity_field_corrections",
+        null=True,
+        blank=True,
+    )
+    corrected_at = models.DateTimeField(auto_now_add=True)
+    reason_category = models.CharField(
+        max_length=32,
+        choices=ReasonCategory,
+        blank=True,
+        default="",
+    )
+    note = models.TextField(blank=True, default="")
+
+    class Meta:
+        ordering = ("created_at", "uuid")
+        indexes = [
+            models.Index(fields=("document", "field"), name="idcorr_doc_field_idx")
+        ]
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValidationError("Identity field corrections are immutable.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Identity field corrections are immutable.")
 
 
 class IdentityExtractionJob(UUIDModel):

@@ -37,6 +37,14 @@ class AuditLog(UUIDModel):
             "IDENTITY_DOCUMENT_REPLACED",
             "Identity document replaced",
         )
+        IDENTITY_REVIEW_FIELDS_CORRECTED = (
+            "IDENTITY_REVIEW_FIELDS_CORRECTED",
+            "Identity review fields corrected",
+        )
+        IDENTITY_VERIFIED_FIELDS_CORRECTED = (
+            "IDENTITY_VERIFIED_FIELDS_CORRECTED",
+            "Identity verified fields corrected",
+        )
         PATIENT_IDENTITY_STATUS_CHANGED = (
             "PATIENT_IDENTITY_STATUS_CHANGED",
             "Patient identity status changed",

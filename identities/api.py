@@ -1,4 +1,6 @@
 import logging
+
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.http import FileResponse
 from drf_spectacular.utils import OpenApiParameter, extend_schema, inline_serializer
 from rest_framework import serializers, status
@@ -29,6 +31,10 @@ try:
 except ImportError:  # pragma: no cover - S3 client is optional in minimal installs
     _S3ClientError = OSError
 
+from identities.corrections import (
+    correct_verified_identity,
+    update_identity_review_fields,
+)
 from identities.serializers import (
     EmptySerializer,
     IdentityDocumentDetailSerializer,
@@ -37,10 +43,12 @@ from identities.serializers import (
     IdentityExtractionJobSerializer,
     IdentityExtractionRequestSerializer,
     IdentityExtractionStatusSerializer,
+    IdentityReviewFieldsSerializer,
     RejectionSerializer,
     VerificationDetailSerializer,
     VerificationQueueFilterSerializer,
     VerificationQueueSerializer,
+    VerifiedCorrectionSerializer,
 )
 from identities.services import (
     approve_identity_document,
@@ -73,7 +81,10 @@ def paginated_envelope(name, child):
 
 
 def require_verification_agent(user):
-    if user.role != User.Role.IDENTITY_VERIFICATION_AGENT:
+    if not (
+        user.is_superuser
+        or user.role == User.Role.IDENTITY_VERIFICATION_AGENT
+    ):
         raise VerificationAgentRequired()
 
 
@@ -396,6 +407,78 @@ class VerificationRejectView(APIView):
             agent=request.user,
             reason=serializer.validated_data["rejection_reason"],
         )
+        return Response({"data": VerificationDetailSerializer(document).data})
+
+
+class VerificationReviewFieldsView(APIView):
+    """Save reviewer corrections for a PENDING identity (staged, no approve)."""
+
+    @extend_schema(
+        operation_id="identity_verification_document_review_fields",
+        request=IdentityReviewFieldsSerializer,
+        responses={
+            200: envelope(
+                "VerificationReviewFieldsUpdated",
+                VerificationDetailSerializer(read_only=True),
+            ),
+            400: ErrorEnvelopeSerializer,
+            401: ErrorEnvelopeSerializer,
+            403: ErrorEnvelopeSerializer,
+            404: ErrorEnvelopeSerializer,
+            409: ErrorEnvelopeSerializer,
+        },
+        tags=["Identity verification"],
+    )
+    def post(self, request, document_uuid):
+        document = verification_document(request.user, document_uuid)
+        serializer = IdentityReviewFieldsSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            document = update_identity_review_fields(
+                actor=request.user,
+                document=document,
+                corrections=serializer.validated_data["fields"],
+                review_version=serializer.validated_data["review_version"],
+            )
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.messages) from exc
+        return Response({"data": VerificationDetailSerializer(document).data})
+
+
+class VerificationCorrectVerifiedView(APIView):
+    """Correct a VERIFIED identity. High-risk; requires a reason."""
+
+    @extend_schema(
+        operation_id="identity_verification_document_correct_verified",
+        request=VerifiedCorrectionSerializer,
+        responses={
+            200: envelope(
+                "VerificationCorrected",
+                VerificationDetailSerializer(read_only=True),
+            ),
+            400: ErrorEnvelopeSerializer,
+            401: ErrorEnvelopeSerializer,
+            403: ErrorEnvelopeSerializer,
+            404: ErrorEnvelopeSerializer,
+            409: ErrorEnvelopeSerializer,
+        },
+        tags=["Identity verification"],
+    )
+    def post(self, request, document_uuid):
+        document = verification_document(request.user, document_uuid)
+        serializer = VerifiedCorrectionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            document = correct_verified_identity(
+                actor=request.user,
+                document=document,
+                corrections=serializer.validated_data["fields"],
+                reason_category=serializer.validated_data["reason_category"],
+                note=serializer.validated_data.get("note", ""),
+                review_version=serializer.validated_data["review_version"],
+            )
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.messages) from exc
         return Response({"data": VerificationDetailSerializer(document).data})
 
 

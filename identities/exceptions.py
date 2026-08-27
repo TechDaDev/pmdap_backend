@@ -23,6 +23,18 @@ class IdentityTransitionConflict(APIException):
     default_code = "identity_transition_conflict"
 
 
+class StaleReviewConflict(APIException):
+    status_code = 409
+    default_detail = "This identity review has changed. Refresh and retry."
+    default_code = "stale_review"
+
+
+class IdentityCorrectionConflict(APIException):
+    status_code = 409
+    default_detail = "Corrected identity value conflicts with another identity."
+    default_code = "identity_correction_conflict"
+
+
 class IdentityFileStorageFailed(APIException):
     status_code = 503
     default_detail = "Identity file storage is temporarily unavailable."
