@@ -25,6 +25,7 @@
       <th scope="col">{% translate 'Type' %}</th>
       <th scope="col">{% translate 'Replacement' %}</th>
       <th scope="col">{% translate 'Age group' %}</th>
+      <th scope="col">{% translate 'Correction' %}</th>
       <th scope="col"></th>
     </tr>
   </thead>
@@ -37,6 +38,7 @@
         <td>{{ row.get_document_type_display }}</td>
         <td>{% if row.replaces %}{% translate 'Replacement' %}{% else %}&mdash;{% endif %}</td>
         <td>{% if row.patient.is_minor %}{% translate 'Minor' %}{% else %}{% translate 'Adult' %}{% endif %}</td>
+        <td>{% if row.field_corrections.exists %}<span class="ops-badge ops-badge-corrected">{% translate 'Corrected' %}</span>{% else %}&mdash;{% endif %}</td>
         <td><a class="button" href="{% url 'admin:ops_verification_review' row.pk %}">{% translate 'Review' %}</a></td>
       </tr>
     {% endfor %}

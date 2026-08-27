@@ -79,6 +79,16 @@ class OpsAdminSite(AdminSite):
                 name="ops_verification_reject",
             ),
             path(
+                "identity-verification/<uuid:document_uuid>/review-fields/",
+                self.admin_view(verification_views.verification_review_fields),
+                name="ops_verification_review_fields",
+            ),
+            path(
+                "identity-verification/<uuid:document_uuid>/correct-verified/",
+                self.admin_view(verification_views.verification_correct_verified),
+                name="ops_verification_correct_verified",
+            ),
+            path(
                 "operations/identity/<uuid:document_uuid>/image/front/",
                 self.admin_view(verification_views.identity_image_front),
                 name="ops_identity_image_front",

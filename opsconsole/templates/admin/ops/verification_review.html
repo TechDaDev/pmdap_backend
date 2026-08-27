@@ -86,15 +86,136 @@
   </table>
 </div>
 
+{% if corrections %}
+<div class="module" style="margin-bottom:12px">
+  <h2>{% translate 'Correction history' %}</h2>
+  <table>
+    <thead><tr><th>{% translate 'Field' %}</th><th>{% translate 'Source' %}</th><th>{% translate 'Corrected by' %}</th><th>{% translate 'At' %}</th><th>{% translate 'Reason' %}</th></tr></thead>
+    <tbody>
+    {% for c in corrections %}
+      <tr>
+        <td>{{ c.field }}</td>
+        <td>{{ c.get_source_display }}</td>
+        <td>{{ c.corrected_by|default:"&mdash;" }}</td>
+        <td>{{ c.corrected_at|date:"Y-m-d H:i" }}</td>
+        <td>{% if c.reason_category %}{{ c.get_reason_category_display }}{% else %}&mdash;{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
 {% if document.verification_status == 'PENDING' and document.status == 'CURRENT' and can_mutate %}
-  <div class="ops-actions">
-    <form method="get" action="{% url 'admin:ops_verification_approve' document.pk %}">
-      <input type="submit" class="ops-cta" value="{% translate 'Approve identity' %}">
-    </form>
-    <form method="get" action="{% url 'admin:ops_verification_reject' document.pk %}">
-      <input type="submit" class="ops-cta ops-cta-danger" value="{% translate 'Reject identity' %}">
-    </form>
-  </div>
+<div class="module" style="margin-bottom:12px">
+  <h2>{% translate 'Identity information (reviewer correction)' %}</h2>
+  <p class="quiet">{% translate 'Compare the fields against the card images. Corrected fields are saved as reviewed values; the identity remains PENDING until you approve.' %}</p>
+  <form method="post" action="{% url 'admin:ops_verification_review_fields' document.pk %}">
+    {% csrf_token %}
+    <input type="hidden" name="review_version" value="{{ document.review_version }}">
+    <table>
+      <thead><tr><th>{% translate 'Field' %}</th><th>{% translate 'OCR / original' %}</th><th>{% translate 'Reviewed value' %}</th><th>{% translate 'Status' %}</th></tr></thead>
+      <tbody>
+      {% for rf in review_fields %}
+        <tr>
+          <td><label for="field_{{ rf.field }}">{{ rf.label }}</label></td>
+          <td class="ops-original">{{ rf.original|default:"&mdash;" }}</td>
+          <td>
+            {% if rf.field == "sex" %}
+              <select id="field_{{ rf.field }}" name="{{ rf.field }}">
+                {% for value, label in sex_choices %}
+                  <option value="{{ value }}" {% if rf.reviewed == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            {% elif rf.field == "blood_group" %}
+              <select id="field_{{ rf.field }}" name="{{ rf.field }}">
+                {% for value, label in blood_choices %}
+                  <option value="{{ value }}" {% if rf.reviewed == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            {% elif rf.field == "date_of_birth" %}
+              <input type="date" id="field_{{ rf.field }}" name="{{ rf.field }}" value="{{ rf.reviewed }}" aria-label="{{ rf.label }}">
+            {% else %}
+              <input type="text" id="field_{{ rf.field }}" name="{{ rf.field }}" value="{{ rf.reviewed }}" aria-label="{{ rf.label }}">
+            {% endif %}
+          </td>
+          <td>{% if rf.corrected %}<span class="ops-badge ops-badge-corrected">{% translate 'Corrected' %}</span>{% else %}&mdash;{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <div class="ops-actions">
+      <input type="submit" class="ops-cta" value="{% translate 'Save corrections' %}">
+    </div>
+  </form>
+</div>
+<div class="ops-actions">
+  <form method="get" action="{% url 'admin:ops_verification_approve' document.pk %}">
+    <input type="submit" class="ops-cta" value="{% translate 'Approve identity' %}">
+  </form>
+  <form method="get" action="{% url 'admin:ops_verification_reject' document.pk %}">
+    <input type="submit" class="ops-cta ops-cta-danger" value="{% translate 'Reject identity' %}">
+  </form>
+</div>
+{% elif document.verification_status == 'VERIFIED' and document.status == 'CURRENT' and can_mutate %}
+<div class="module" style="margin-bottom:12px">
+  <h2>{% translate 'Correct verified identity' %}</h2>
+  <p class="ops-warning">{% translate 'Warning: you are changing verified identity information. A reason is required and every change is audited.' %}</p>
+  <form method="post" action="{% url 'admin:ops_verification_correct_verified' document.pk %}">
+    {% csrf_token %}
+    <input type="hidden" name="review_version" value="{{ document.review_version }}">
+    <table>
+      <tr>
+        <th><label for="reason_category">{% translate 'Correction reason' %}</label></th>
+        <td>
+          <select id="reason_category" name="reason_category" required aria-required="true">
+            <option value="">{% translate 'Select a reason' %}</option>
+            {% for value, label in reason_categories %}
+              <option value="{{ value }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+        </td>
+      </tr>
+      <tr>
+        <th><label for="correction_note">{% translate 'Note (optional)' %}</label></th>
+        <td><input type="text" id="correction_note" name="note" maxlength="500" aria-label="{% translate 'Correction note' %}"></td>
+      </tr>
+    </table>
+    <table>
+      <thead><tr><th>{% translate 'Field' %}</th><th>{% translate 'Current value' %}</th><th>{% translate 'Corrected value' %}</th></tr></thead>
+      <tbody>
+      {% for rf in review_fields %}
+        <tr>
+          <td><label for="vc_field_{{ rf.field }}">{{ rf.label }}</label></td>
+          <td class="ops-original">{{ rf.original|default:"&mdash;" }}</td>
+          <td>
+            {% if rf.field == "sex" %}
+              <select id="vc_field_{{ rf.field }}" name="{{ rf.field }}">
+                {% for value, label in sex_choices %}
+                  <option value="{{ value }}" {% if rf.reviewed == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            {% elif rf.field == "blood_group" %}
+              <select id="vc_field_{{ rf.field }}" name="{{ rf.field }}">
+                {% for value, label in blood_choices %}
+                  <option value="{{ value }}" {% if rf.reviewed == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            {% elif rf.field == "date_of_birth" %}
+              <input type="date" id="vc_field_{{ rf.field }}" name="{{ rf.field }}" value="{{ rf.reviewed }}" aria-label="{{ rf.label }}">
+            {% else %}
+              <input type="text" id="vc_field_{{ rf.field }}" name="{{ rf.field }}" value="{{ rf.reviewed }}" aria-label="{{ rf.label }}">
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <div class="ops-actions">
+      <input type="submit" class="ops-cta ops-cta-danger" value="{% translate 'Save verified correction' %}">
+    </div>
+  </form>
+</div>
 {% endif %}
 
 <p><a href="{% url 'admin:ops_verification_queue' %}">&laquo; {% translate 'Back to queue' %}</a></p>

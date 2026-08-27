@@ -110,3 +110,31 @@
   color: var(--error-bg, #ba2121);
   font-weight: 600;
 }
+
+/* M29.5 identity correction workstation */
+.ops-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 0.85em;
+  font-weight: 700;
+}
+
+.ops-badge-corrected {
+  background: #caa1f9;
+  color: #2d0a52;
+}
+
+.ops-original {
+  color: #666;
+  font-style: italic;
+}
+
+.ops-warning {
+  color: var(--error-bg, #ba2121);
+  font-weight: 600;
+}
+
+table th label {
+  display: block;
+}
