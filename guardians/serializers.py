@@ -6,6 +6,7 @@ from rest_framework import serializers
 
 from guardians.exceptions import PatientNotMinor, RelationshipEvidenceRequired
 from guardians.models import GuardianEvidence, GuardianRelationship
+from guardians.services import can_approve_guardian_relationship
 from identities.models import IdentityDocument
 from identities.serializers import (
     IdentityDocumentInputSerializer,
@@ -270,8 +271,7 @@ class GuardianRelationshipPatientSerializer(serializers.ModelSerializer):
         if obj.active or obj.dismissed_by_guardian_at is not None:
             return False
         return (
-            obj.verification_status
-            == GuardianRelationship.VerificationStatus.REJECTED
+            obj.verification_status == GuardianRelationship.VerificationStatus.REJECTED
             or obj.ended_at is not None
         )
 
@@ -337,12 +337,14 @@ class GuardianRelationshipVerificationSerializer(GuardianRelationshipSerializer)
     minor_patient = GuardianVerificationPatientSerializer(read_only=True)
     guardian_patient = serializers.SerializerMethodField()
     evidences = GuardianEvidenceSerializer(many=True, read_only=True)
+    review_readiness = serializers.SerializerMethodField()
 
     class Meta(GuardianRelationshipSerializer.Meta):
         fields = GuardianRelationshipSerializer.Meta.fields + (
             "minor_patient",
             "guardian_patient",
             "evidences",
+            "review_readiness",
             "rejection_reason",
         )
 
@@ -350,6 +352,67 @@ class GuardianRelationshipVerificationSerializer(GuardianRelationshipSerializer)
     def get_guardian_patient(self, obj):
         profile = getattr(obj.guardian_user, "patient_profile", None)
         return GuardianVerificationPatientSerializer(profile).data if profile else None
+
+    @extend_schema_field(serializers.CharField)
+    def get_review_readiness(self, obj):
+        decision = can_approve_guardian_relationship(obj)
+        return "READY_FOR_REVIEW" if decision.eligible else "EVIDENCE_INCOMPLETE"
+
+
+class GuardianApprovalEvaluationSerializer(serializers.Serializer):
+    eligible = serializers.BooleanField(read_only=True)
+    code = serializers.CharField(read_only=True)
+    reasons = serializers.ListField(child=serializers.CharField(), read_only=True)
+    adult_identity_verified = serializers.BooleanField(read_only=True)
+    minor_identity_verified = serializers.BooleanField(read_only=True)
+    age_valid = serializers.BooleanField(read_only=True)
+    family_result = serializers.CharField(read_only=True)
+    family_explanation = serializers.CharField(read_only=True)
+    name_result = serializers.CharField(read_only=True)
+    name_explanation = serializers.CharField(read_only=True)
+    name_evidence_kind = serializers.CharField(read_only=True, allow_null=True)
+    official_evidence_present = serializers.BooleanField(read_only=True)
+    adult_identity_document_uuid = serializers.UUIDField(
+        read_only=True, allow_null=True
+    )
+    minor_identity_document_uuid = serializers.UUIDField(
+        read_only=True, allow_null=True
+    )
+
+
+class GuardianRelationshipVerificationDetailSerializer(
+    GuardianRelationshipVerificationSerializer
+):
+    approval_evaluation = serializers.SerializerMethodField()
+
+    class Meta(GuardianRelationshipVerificationSerializer.Meta):
+        fields = GuardianRelationshipVerificationSerializer.Meta.fields + (
+            "approval_evaluation",
+        )
+
+    @extend_schema_field(GuardianApprovalEvaluationSerializer)
+    def get_approval_evaluation(self, obj):
+        decision = can_approve_guardian_relationship(obj)
+        return {
+            "eligible": decision.eligible,
+            "code": decision.code,
+            "reasons": list(decision.reasons),
+            "adult_identity_verified": decision.adult_identity_verified,
+            "minor_identity_verified": decision.minor_identity_verified,
+            "age_valid": decision.age_valid,
+            "family_result": decision.family_result,
+            "family_explanation": decision.family_explanation,
+            "name_result": decision.name_result,
+            "name_explanation": decision.name_explanation,
+            "name_evidence_kind": decision.name_evidence_kind,
+            "official_evidence_present": decision.official_evidence_present,
+            "adult_identity_document_uuid": (
+                decision.adult_card.uuid if decision.adult_card else None
+            ),
+            "minor_identity_document_uuid": (
+                decision.minor_card.uuid if decision.minor_card else None
+            ),
+        }
 
 
 class GuardianRelationshipFilterSerializer(

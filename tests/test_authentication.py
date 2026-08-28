@@ -22,6 +22,7 @@ PUBLIC_USER_FIELDS = {
     "role",
     "email_verified",
     "phone_verified",
+    "can_verify_identity",
     "created_at",
 }
 
@@ -205,6 +206,29 @@ def test_valid_access_token_authorizes_me(api_client):
     assert response.status_code == 200
     assert set(response.json()["data"]) == PUBLIC_USER_FIELDS
     assert response.json()["data"]["uuid"] == str(user.uuid)
+    assert response.json()["data"]["can_verify_identity"] is False
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    ("user_fields", "expected"),
+    [
+        ({"role": "IDENTITY_VERIFICATION_AGENT"}, True),
+        ({"role": "ADMIN", "is_staff": True, "is_superuser": True}, True),
+        ({"role": "ADMIN", "is_staff": True}, False),
+        ({"role": "PATIENT"}, False),
+    ],
+)
+def test_me_exposes_authoritative_verification_capability(
+    api_client, user_fields, expected
+):
+    user = UserFactory(status="ACTIVE", **user_fields)
+    access = str(RefreshToken.for_user(user).access_token)
+
+    response = api_client.get(ME, HTTP_AUTHORIZATION=f"Bearer {access}")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["can_verify_identity"] is expected
 
 
 @pytest.mark.django_db

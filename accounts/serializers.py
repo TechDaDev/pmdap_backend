@@ -1,6 +1,7 @@
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from rest_framework_simplejwt.settings import api_settings
@@ -26,6 +27,8 @@ class RejectUnknownFieldsMixin:
 
 
 class PublicUserSerializer(serializers.ModelSerializer):
+    can_verify_identity = serializers.SerializerMethodField()
+
     class Meta:
         model = User
         fields = (
@@ -35,9 +38,16 @@ class PublicUserSerializer(serializers.ModelSerializer):
             "role",
             "email_verified",
             "phone_verified",
+            "can_verify_identity",
             "created_at",
         )
         read_only_fields = fields
+
+    @extend_schema_field(serializers.BooleanField)
+    def get_can_verify_identity(self, obj):
+        from identities.permissions import can_verify_identity
+
+        return can_verify_identity(obj)
 
 
 class RegisterSerializer(RejectUnknownFieldsMixin, serializers.Serializer):

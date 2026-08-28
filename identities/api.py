@@ -23,6 +23,7 @@ from identities.extraction_store import (
     read_extraction_result,
 )
 from identities.models import IdentityDocument, IdentityExtractionJob
+from identities.permissions import can_verify_identity
 from identities.storage import private_identity_storage
 from identities.tasks import extract_identity_document
 
@@ -81,10 +82,7 @@ def paginated_envelope(name, child):
 
 
 def require_verification_agent(user):
-    if not (
-        user.is_superuser
-        or user.role == User.Role.IDENTITY_VERIFICATION_AGENT
-    ):
+    if not (user.is_superuser or user.role == User.Role.IDENTITY_VERIFICATION_AGENT):
         raise VerificationAgentRequired()
 
 
@@ -286,7 +284,7 @@ class IdentityDocumentImageView(APIView):
         tags=["Identity documents"],
     )
     def get(self, request, document_uuid, side):
-        if request.user.role == User.Role.IDENTITY_VERIFICATION_AGENT:
+        if can_verify_identity(request.user):
             document = verification_document(request.user, document_uuid)
         else:
             document = patient_document(request.user, document_uuid)
@@ -580,9 +578,7 @@ class IdentityExtractionView(APIView):
         back_key = ""
         try:
             if back:
-                back_key = _store_staging(
-                    job, "back" + _safe_ext(back.name), back
-                )
+                back_key = _store_staging(job, "back" + _safe_ext(back.name), back)
             job.front_key = front_key
             job.back_key = back_key
             job.save(update_fields=["front_key", "back_key", "updated_at"])
@@ -616,9 +612,7 @@ class IdentityExtractionStatusView(APIView):
     def get(self, request, job_uuid):
         require_patient(request.user)
         try:
-            job = IdentityExtractionJob.objects.get(
-                uuid=job_uuid, user=request.user
-            )
+            job = IdentityExtractionJob.objects.get(uuid=job_uuid, user=request.user)
         except IdentityExtractionJob.DoesNotExist:
             raise IdentityExtractionJobNotFound() from None
 
@@ -626,9 +620,7 @@ class IdentityExtractionStatusView(APIView):
             IdentityExtractionJob.Status.PENDING,
             IdentityExtractionJob.Status.PROCESSING,
         ):
-            return Response(
-                {"data": {"job_id": str(job.uuid), "status": job.status}}
-            )
+            return Response({"data": {"job_id": str(job.uuid), "status": job.status}})
 
         if job.status == IdentityExtractionJob.Status.FAILED:
             data = {

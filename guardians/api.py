@@ -18,6 +18,7 @@ from guardians.serializers import (
     GuardianRelationshipFilterSerializer,
     GuardianRelationshipPatientSerializer,
     GuardianRelationshipSerializer,
+    GuardianRelationshipVerificationDetailSerializer,
     GuardianRelationshipVerificationSerializer,
     MinorCreateResponseSerializer,
     MinorCreateSerializer,
@@ -146,9 +147,7 @@ class GuardianRelationshipPatientCollectionView(APIView):
             # Patient-facing default: hide dismissed rejected/revoked rows.
             # Dismissal never deletes the immutable row or its audit history.
             queryset = queryset.filter(dismissed_by_guardian_at__isnull=True)
-        return page_response(
-            request, queryset, GuardianRelationshipPatientSerializer
-        )
+        return page_response(request, queryset, GuardianRelationshipPatientSerializer)
 
 
 class GuardianRelationshipPatientDetailView(APIView):
@@ -345,8 +344,8 @@ class GuardianVerificationDetailView(APIView):
         operation_id="guardian_relationship_verification_retrieve",
         responses={
             200: envelope(
-                "GuardianRelationshipVerificationDetail",
-                GuardianRelationshipVerificationSerializer(read_only=True),
+                "GuardianRelationshipVerificationDetailEnvelope",
+                GuardianRelationshipVerificationDetailSerializer(read_only=True),
             ),
             401: ErrorEnvelopeSerializer,
             403: ErrorEnvelopeSerializer,
@@ -357,7 +356,11 @@ class GuardianVerificationDetailView(APIView):
     def get(self, request, relationship_uuid):
         relationship = verification_relationship(request.user, relationship_uuid)
         return Response(
-            {"data": GuardianRelationshipVerificationSerializer(relationship).data}
+            {
+                "data": GuardianRelationshipVerificationDetailSerializer(
+                    relationship
+                ).data
+            }
         )
 
 
@@ -368,7 +371,7 @@ class GuardianVerificationApproveView(APIView):
         responses={
             200: envelope(
                 "GuardianRelationshipApproved",
-                GuardianRelationshipVerificationSerializer(read_only=True),
+                GuardianRelationshipVerificationDetailSerializer(read_only=True),
             ),
             400: ErrorEnvelopeSerializer,
             401: ErrorEnvelopeSerializer,
@@ -386,7 +389,11 @@ class GuardianVerificationApproveView(APIView):
             relationship=relationship, agent=request.user
         )
         return Response(
-            {"data": GuardianRelationshipVerificationSerializer(relationship).data}
+            {
+                "data": GuardianRelationshipVerificationDetailSerializer(
+                    relationship
+                ).data
+            }
         )
 
 
@@ -397,7 +404,7 @@ class GuardianVerificationRejectView(APIView):
         responses={
             200: envelope(
                 "GuardianRelationshipRejected",
-                GuardianRelationshipVerificationSerializer(read_only=True),
+                GuardianRelationshipVerificationDetailSerializer(read_only=True),
             ),
             400: ErrorEnvelopeSerializer,
             401: ErrorEnvelopeSerializer,
@@ -417,7 +424,11 @@ class GuardianVerificationRejectView(APIView):
             reason=serializer.validated_data["rejection_reason"],
         )
         return Response(
-            {"data": GuardianRelationshipVerificationSerializer(relationship).data}
+            {
+                "data": GuardianRelationshipVerificationDetailSerializer(
+                    relationship
+                ).data
+            }
         )
 
 

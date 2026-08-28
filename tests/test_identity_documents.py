@@ -402,7 +402,7 @@ def test_original_bytes_and_sha256_are_preserved(api_client, image_format, mime)
 
 
 @pytest.mark.django_db
-def test_owner_and_verification_agent_can_stream_original_image(api_client):
+def test_owner_verification_agent_and_superuser_can_stream_original_image(api_client):
     owner, _ = create_patient()
     raw = image_bytes()
     created = submit(
@@ -419,11 +419,21 @@ def test_owner_and_verification_agent_can_stream_original_image(api_client):
     agent = UserFactory(role="IDENTITY_VERIFICATION_AGENT", status="ACTIVE")
     auth(api_client, agent)
     agent_response = api_client.get(image_url)
+    superuser = UserFactory(
+        role="ADMIN",
+        status="ACTIVE",
+        is_staff=True,
+        is_superuser=True,
+    )
+    auth(api_client, superuser)
+    superuser_response = api_client.get(image_url)
 
     assert owner_response.status_code == 200
     assert b"".join(owner_response.streaming_content) == raw
     assert agent_response.status_code == 200
     assert b"".join(agent_response.streaming_content) == raw
+    assert superuser_response.status_code == 200
+    assert b"".join(superuser_response.streaming_content) == raw
     assert owner_response["Content-Type"] == "image/png"
     assert "private-identity" not in str(owner_response.headers)
 

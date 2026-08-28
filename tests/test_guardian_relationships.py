@@ -94,8 +94,25 @@ def test_agent_queue_detail_and_approval(api_client):
     )
 
     assert queue.status_code == detail.status_code == approved.status_code == 200
-    assert queue.json()["data"]["results"][0]["uuid"] == str(relationship.uuid)
-    assert detail.json()["data"]["minor_patient"]["uuid"] == str(minor.uuid)
+    queue_item = queue.json()["data"]["results"][0]
+    detail_data = detail.json()["data"]
+    assert queue_item["uuid"] == str(relationship.uuid)
+    assert queue_item["review_readiness"] == "READY_FOR_REVIEW"
+    assert "approval_evaluation" not in queue_item
+    assert detail_data["minor_patient"]["uuid"] == str(minor.uuid)
+    evaluation = detail_data["approval_evaluation"]
+    assert evaluation["eligible"] is True
+    assert evaluation["code"] == "ELIGIBLE"
+    assert evaluation["adult_identity_verified"] is True
+    assert evaluation["minor_identity_verified"] is True
+    assert evaluation["age_valid"] is True
+    assert evaluation["family_result"] == "MATCH"
+    assert evaluation["name_evidence_kind"] == "MOTHER"
+    assert evaluation["name_result"] == "MATCH"
+    assert evaluation["official_evidence_present"] is False
+    assert evaluation["adult_identity_document_uuid"]
+    assert evaluation["minor_identity_document_uuid"]
+    assert "FAM-100" not in str(queue_item)
     assert "email" not in str(detail.json())
     relationship.refresh_from_db()
     assert relationship.verification_status == "VERIFIED"
