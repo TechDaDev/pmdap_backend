@@ -6,15 +6,16 @@ never used. Covers the field matrix plus the critical regression guards:
 family number must never come from MRZ noise, and the H... body number must
 never populate family_number.
 """
+
 import pytest
 
 from identities import extraction, mrz
 from identities.regions import REGIONS, IraqiNationalCardRegionExtractor
 
-
 # --------------------------------------------------------------------------- #
 # Synthetic helpers
 # --------------------------------------------------------------------------- #
+
 
 def _cd(value):
     return str(mrz.check_digit(value))
@@ -27,12 +28,14 @@ def _iraqi_mrz_lines(dob="900517", sex="M", expiry="360101", doc="H12345678"):
     return [line1, line2, line3]
 
 
-def _front(name="الاسم اناو TESTNAME",
-           father="اباوك TESTFATHER",
-           grandfather="ابابيرTESTGRAND",
-           sex="الجنس اركمز ذكر",
-           card="123456789012",
-           body="H12345678"):
+def _front(
+    name="الاسم اناو TESTNAME",
+    father="اباوك TESTFATHER",
+    grandfather="ابابيرTESTGRAND",
+    sex="الجنس اركمز ذكر",
+    card="123456789012",
+    body="H12345678",
+):
     return [
         extraction.SideLine("FRONT", name, 0.9),
         extraction.SideLine("FRONT", father, 0.9),
@@ -48,9 +51,17 @@ def _front(name="الاسم اناو TESTNAME",
     ]
 
 
-def _card_lines(*, blood=("ROI_BLOOD", "O+"), dob=("ROI_DOB", "1990/05/17"),
-                family=("ROI_FAMILY", "TESTFAMILY123456"), mrz=True, lines=None):
+def _card_lines(
+    *,
+    blood=("ROI_BLOOD", "O+"),
+    dob=("ROI_DOB", "1990/05/17"),
+    family=("ROI_FAMILY", "TESTFAMILY123456"),
+    mrz=True,
+    lines=None,
+):
     lines = list(lines) if lines is not None else _front()
+    lines.append(extraction.SideLine("BACK", "تاريخ الاصدار: 2024/02/03", 0.9))
+    lines.append(extraction.SideLine("BACK", "تاريخ النفاذ: 2036/01/01", 0.9))
     lines.append(extraction.SideLine("BACK", "تأريخ الولادة ارؤزى لهدايك بوون", 0.8))
     lines.append(extraction.SideLine("BACK", "الرقملعانليمارى خاني", 0.7))
     if blood:
@@ -72,6 +83,7 @@ def _run(lines):
 # --------------------------------------------------------------------------- #
 # Name components
 # --------------------------------------------------------------------------- #
+
 
 def test_name_father_grandfather_extracted_distinct():
     fields, warnings, _ = _run(_card_lines(mrz=False))
@@ -181,6 +193,7 @@ def test_father_label_alone_ignored():
 # Sex
 # --------------------------------------------------------------------------- #
 
+
 def test_sex_male_from_front_and_mrz_agree():
     fields, warnings, _ = _run(_card_lines())
     assert fields["sex"]["value"] == "MALE"
@@ -218,18 +231,34 @@ def test_sex_from_mrz_only():
 # Blood group
 # --------------------------------------------------------------------------- #
 
-@pytest.mark.parametrize("raw,expected", [
-    ("O+", "O+"), ("O-", "O-"), ("A+", "A+"), ("A-", "A-"),
-    ("B+", "B+"), ("B-", "B-"), ("AB+", "AB+"), ("AB-", "AB-"),
-])
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("O+", "O+"),
+        ("O-", "O-"),
+        ("A+", "A+"),
+        ("A-", "A-"),
+        ("B+", "B+"),
+        ("B-", "B-"),
+        ("AB+", "AB+"),
+        ("AB-", "AB-"),
+    ],
+)
 def test_blood_group_all_groups(raw, expected):
     fields, _, _ = _run(_card_lines(blood=("ROI_BLOOD", raw), mrz=False))
     assert fields["blood_group"]["value"] == expected
 
 
-@pytest.mark.parametrize("raw,expected", [
-    ("0+", "O+"), ("O +", "O+"), ("AB +", "AB+"), ("0-", "O-"),
-])
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("0+", "O+"),
+        ("O +", "O+"),
+        ("AB +", "AB+"),
+        ("0-", "O-"),
+    ],
+)
 def test_blood_group_ocr_variants(raw, expected):
     fields, _, _ = _run(_card_lines(blood=("ROI_BLOOD", raw), mrz=False))
     assert fields["blood_group"]["value"] == expected
@@ -251,11 +280,12 @@ def test_blood_group_missing_warns():
 # National / card number + O/0 confusion
 # --------------------------------------------------------------------------- #
 
+
 def test_national_card_number_extracted():
     fields, _, _ = _run(_card_lines(mrz=False))
     assert fields["national_card_number"]["value"] == "123456789012"
-    # Compatibility alias for the current IdentityDocument persistence.
-    assert fields["document_number"]["value"] == "123456789012"
+    assert fields["document_number"]["value"] == "H12345678"
+    assert fields["card_body_number"]["value"] == "H12345678"
 
 
 def test_card_number_o_zero_normalized():
@@ -266,9 +296,10 @@ def test_card_number_o_zero_normalized():
     assert "OCR_CHARACTER_NORMALIZED" in warnings
     # Confidence must drop after a normalization correction.
     normal_fields, _, _ = _run(_card_lines(mrz=False))
-    assert fields["national_card_number"]["confidence"] < normal_fields[
-        "national_card_number"
-    ]["confidence"]
+    assert (
+        fields["national_card_number"]["confidence"]
+        < normal_fields["national_card_number"]["confidence"]
+    )
 
 
 def test_body_number_case_canonicalized_not_normalized():
@@ -284,6 +315,7 @@ def test_body_number_case_canonicalized_not_normalized():
 # --------------------------------------------------------------------------- #
 # Unique card body number
 # --------------------------------------------------------------------------- #
+
 
 def test_unique_body_number_set_not_family():
     fields, _, _ = _run(_card_lines())
@@ -302,6 +334,7 @@ def test_unique_body_number_without_mrz():
 # --------------------------------------------------------------------------- #
 # Family number
 # --------------------------------------------------------------------------- #
+
 
 def test_family_number_from_back():
     fields, _, _ = _run(_card_lines())
@@ -339,6 +372,7 @@ def test_family_number_never_equals_body_number():
 # --------------------------------------------------------------------------- #
 # Date of birth
 # --------------------------------------------------------------------------- #
+
 
 def test_dob_printed_and_mrz_agree():
     fields, _, _ = _run(_card_lines())
@@ -386,17 +420,57 @@ def test_dob_invalid_month_ignored():
 def test_expiry_prefers_mrz_on_printed_truncation():
     # A truncated/ambiguous printed expiry must not win over the validated MRZ.
     lines = _card_lines()
-    lines = [ln for ln in lines if ln.side != "ROI_DATES"]
-    lines.append(extraction.SideLine("ROI_DATES", "2036/07/01", 0.9))
+    lines = [ln for ln in lines if "تاريخ النفاذ" not in ln.text]
+    lines.append(extraction.SideLine("ROI_DATES", "تاريخ النفاذ2036/07/01", 0.9))
     fields, warnings, _ = _run(lines)
     assert fields["expiry_date"]["value"] == "2036-01-01"  # MRZ authoritative
     assert fields["expiry_date"]["cross_check"] == "MRZ_MISMATCH"
     assert "SOURCE_MISMATCH" in warnings
 
 
+def test_issue_and_expiry_require_explicit_labels_and_support_glued_digits():
+    lines = _front() + [
+        extraction.SideLine("BACK", "تأريخ الاصدار٢٠٢٤/٠٢/٠٣", 0.9),
+        extraction.SideLine("BACK", "تاريخ النفاذ۲۰۳۴/۰۲/۰۲", 0.9),
+    ]
+
+    fields, _, _ = _run(lines)
+
+    assert fields["issue_date"]["value"] == "2024-02-03"
+    assert fields["expiry_date"]["value"] == "2034-02-02"
+
+
+def test_date_labels_and_latin_roi_values_pair_by_printed_row_order():
+    lines = _front() + [
+        extraction.SideLine("BACK", "تأريخ الاصدار روژى دەرچوون", 0.9),
+        extraction.SideLine("BACK", "تأريخ النفاذ ڕۆژی بەسەرچوون", 0.9),
+        extraction.SideLine("ROI_DATES", "2024/02/03", 0.9),
+        extraction.SideLine("ROI_DATES", "2034/02/02", 0.9),
+    ]
+
+    fields, _, _ = _run(lines)
+
+    assert fields["issue_date"]["value"] == "2024-02-03"
+    assert fields["expiry_date"]["value"] == "2034-02-02"
+
+
+def test_unlabeled_dates_never_become_issue_expiry_or_dob():
+    lines = _front() + [
+        extraction.SideLine("ROI_DATES", "2024/02/03", 0.9),
+        extraction.SideLine("ROI_DATES", "2034/02/02", 0.9),
+    ]
+
+    fields, _, _ = _run(lines)
+
+    assert "issue_date" not in fields
+    assert "expiry_date" not in fields
+    assert "date_of_birth" not in fields
+
+
 # --------------------------------------------------------------------------- #
 # MRZ parser
 # --------------------------------------------------------------------------- #
+
 
 def test_iraqi_mrz_parses_all_fields():
     lines = _iraqi_mrz_lines()
@@ -454,6 +528,7 @@ def test_iraqi_mrz_line3_mangled_arabic_digits_sanitized():
 # Missing-field / noise robustness
 # --------------------------------------------------------------------------- #
 
+
 def test_empty_input_missing_everything():
     fields, warnings, mrz_summary = extraction.extract_identity(
         "UNIFIED_NATIONAL_CARD", []
@@ -466,8 +541,13 @@ def test_empty_input_missing_everything():
 def test_legacy_plain_strings_treated_as_front():
     fields, warnings, mrz_summary = extraction.extract_identity(
         "UNIFIED_NATIONAL_CARD",
-        ["العراق", "الاسم اناو SYNTHNAME", "الجنس اركمز ذكر",
-         "123456789012", "H12345678"],
+        [
+            "العراق",
+            "الاسم اناو SYNTHNAME",
+            "الجنس اركمز ذكر",
+            "123456789012",
+            "H12345678",
+        ],
     )
     assert fields["name"]["value"] == "SYNTHNAME"
     assert fields["sex"]["value"] == "MALE"
@@ -479,6 +559,7 @@ def test_legacy_plain_strings_treated_as_front():
 # --------------------------------------------------------------------------- #
 # Region extractor
 # --------------------------------------------------------------------------- #
+
 
 class _FakeEngine:
     def __init__(self, lines=None):
@@ -511,7 +592,7 @@ def test_region_extractor_produces_tagged_lines():
 
 
 def test_region_definitions_are_normalized_fractions():
-    for tag, spec in REGIONS.items():
+    for _tag, spec in REGIONS.items():
         assert 0.0 <= spec["x"] < 1.0
         assert 0.0 <= spec["y"] < 1.0
         assert spec["w"] > 0 and spec["h"] > 0
@@ -524,10 +605,9 @@ def test_region_definitions_are_normalized_fractions():
 # Multi-sample label robustness (second real-card findings, SYNTHETIC values)
 # --------------------------------------------------------------------------- #
 
+
 def _front_only(*lines):
-    return [
-        extraction.SideLine("FRONT", text, conf) for text, conf in lines
-    ] + [
+    return [extraction.SideLine("FRONT", text, conf) for text, conf in lines] + [
         extraction.SideLine("FRONT", "الجنس اركمز ذكر", 0.9),
         extraction.SideLine("FRONT", "123456789012", 0.9),
         extraction.SideLine("FRONT", "G12345678", 0.9),
@@ -536,23 +616,29 @@ def _front_only(*lines):
 
 # --- Name: same-line multilingual / glued connector / split-line ---
 
-@pytest.mark.parametrize("name_line", [
-    "الاسم / ناو : TESTNAME",
-    "الاسم ناو TESTNAME",
-    "ناو: TESTNAME",
-    "الاسم ناوTESTNAME",  # connector glued to the value
-])
+
+@pytest.mark.parametrize(
+    "name_line",
+    [
+        "الاسم / ناو : TESTNAME",
+        "الاسم ناو TESTNAME",
+        "ناو: TESTNAME",
+        "الاسم ناوTESTNAME",  # connector glued to the value
+    ],
+)
 def test_name_label_variants_multilingual(name_line):
     fields, _, _ = _run(_front_only((name_line, 0.9), ("باوك TESTFATHER", 0.9)))
     assert fields["name"]["value"] == "TESTNAME"
 
 
 def test_name_split_line_label_then_value():
-    fields, _, _ = _run(_front_only(
-        ("الاسم", 0.9),
-        ("TESTNAME", 0.9),
-        ("باوك TESTFATHER", 0.9),
-    ))
+    fields, _, _ = _run(
+        _front_only(
+            ("الاسم", 0.9),
+            ("TESTNAME", 0.9),
+            ("باوك TESTFATHER", 0.9),
+        )
+    )
     assert fields["name"]["value"] == "TESTNAME"
 
 
@@ -564,52 +650,63 @@ def test_name_label_stuck_to_value():
 
 # --- Father: Kurdish label, glued, split-line ---
 
-@pytest.mark.parametrize("father_line", [
-    "الاب / باوك : TESTFATHER",
-    "باوك: TESTFATHER",
-    "الاب باوك TESTFATHER",
-    "باوكTESTFATHER",  # Kurdish label glued to the value
-])
+
+@pytest.mark.parametrize(
+    "father_line",
+    [
+        "الاب / باوك : TESTFATHER",
+        "باوك: TESTFATHER",
+        "الاب باوك TESTFATHER",
+        "باوكTESTFATHER",  # Kurdish label glued to the value
+    ],
+)
 def test_father_label_variants(father_line):
     fields, _, _ = _run(_front_only(("الاسم اناو TESTNAME", 0.9), (father_line, 0.9)))
     assert fields["father_name"]["value"] == "TESTFATHER"
 
 
 def test_father_split_line_label_then_value():
-    fields, _, _ = _run(_front_only(
-        ("الاسم اناو TESTNAME", 0.9),
-        ("باوك", 0.9),
-        ("TESTFATHER", 0.9),
-    ))
+    fields, _, _ = _run(
+        _front_only(
+            ("الاسم اناو TESTNAME", 0.9),
+            ("باوك", 0.9),
+            ("TESTFATHER", 0.9),
+        )
+    )
     assert fields["father_name"]["value"] == "TESTFATHER"
 
 
 def test_father_split_line_must_not_grab_grandfather():
     # Label line then a grandfather-labeled line: the grandfather must win.
-    fields, _, _ = _run(_front_only(
-        ("الاسم اناو TESTNAME", 0.9),
-        ("الاب", 0.9),
-        ("ابابيرTESTGRAND", 0.9),
-    ))
+    fields, _, _ = _run(
+        _front_only(
+            ("الاسم اناو TESTNAME", 0.9),
+            ("الاب", 0.9),
+            ("ابابيرTESTGRAND", 0.9),
+        )
+    )
     assert fields["grandfather_name"]["value"] == "TESTGRAND"
     assert "father_name" not in fields or fields["father_name"]["value"] != "TESTGRAND"
 
 
 def test_maternal_grandfather_never_populates_grandfather():
     # Kurdish father chain, mother, then a maternal grandfather row.
-    fields, _, _ = _run(_front_only(
-        ("الاسم ناوTESTNAME", 0.9),
-        ("باوكTESTFATHER", 0.9),
-        ("ابابيرPATERNALGRAND", 0.9),
-        ("ردايك TESTMOTHER", 0.9),
-        ("بابير MATERNALGRAND", 0.9),
-    ))
+    fields, _, _ = _run(
+        _front_only(
+            ("الاسم ناوTESTNAME", 0.9),
+            ("باوكTESTFATHER", 0.9),
+            ("ابابيرPATERNALGRAND", 0.9),
+            ("ردايك TESTMOTHER", 0.9),
+            ("بابير MATERNALGRAND", 0.9),
+        )
+    )
     assert fields["grandfather_name"]["value"] == "PATERNALGRAND"
     assert fields["grandfather_name"]["value"] != "MATERNALGRAND"
     assert "MATERNALGRAND" not in [f["value"] for f in fields.values()]
 
 
 # --- Unique card body number: prefix-agnostic + FRONT/MRZ cross-check ---
+
 
 @pytest.mark.parametrize("prefix", ["A", "G", "H", "Z"])
 def test_body_number_any_letter_prefix(prefix):
@@ -661,9 +758,16 @@ def test_body_number_front_mrz_mismatch_warns():
     assert "SOURCE_MISMATCH" in warnings
 
 
-@pytest.mark.parametrize("bad", [
-    "123456789", "GH1234567", "G1234", "G1234567890", "BODY123456",
-])
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "123456789",
+        "GH1234567",
+        "G1234",
+        "G1234567890",
+        "BODY123456",
+    ],
+)
 def test_invalid_body_numbers_rejected(bad):
     lines = _front()
     lines[10] = extraction.SideLine("FRONT", bad, 0.9)

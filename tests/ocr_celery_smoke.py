@@ -4,6 +4,7 @@ import io
 import json
 import os
 import time
+import uuid
 from datetime import date
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.local")
@@ -23,7 +24,10 @@ from patients.models import PatientProfile  # noqa: E402
 def _synthetic_upload():
     image = Image.new("RGB", (1400, 360), "white")
     draw = ImageDraw.Draw(image)
-    font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 52)
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 52)
+    except OSError:
+        font = ImageFont.load_default(size=52)
     draw.text((60, 60), "Patient Report", fill="black", font=font)
     draw.text((60, 180), "Report Date: 14/03/2026", fill="black", font=font)
     content = io.BytesIO()
@@ -37,18 +41,15 @@ def _synthetic_upload():
 
 
 def main():
-    PatientProfile.objects.filter(
-        user__email="m8-celery-acceptance@example.com"
-    ).delete()
-    User.objects.filter(email="m8-celery-acceptance@example.com").delete()
+    suffix = uuid.uuid4().hex[:12]
     user = User.objects.create_user(
-        email="m8-celery-acceptance@example.com",
+        email=f"m8-celery-{suffix}@example.com",
         password="M8-celery-acceptance-password-2026!",
         status=User.Status.ACTIVE,
     )
     PatientProfile.objects.create(
         user=user,
-        digital_id="99000000000000001",
+        digital_id=str(99000000000000000 + int(suffix[:8], 16) % 999999999999999),
         full_name="Synthetic Celery Acceptance",
         date_of_birth=date(1990, 1, 1),
         sex=PatientProfile.Sex.UNSPECIFIED,
@@ -60,6 +61,7 @@ def main():
         "/api/v1/documents/",
         {"file": _synthetic_upload(), "document_type": "MEDICAL_REPORT"},
         format="multipart",
+        HTTP_HOST="localhost",
     )
     if response.status_code != 201:
         raise RuntimeError(f"Upload failed with status {response.status_code}.")
@@ -68,17 +70,20 @@ def main():
     deadline = time.monotonic() + 180
     while time.monotonic() < deadline:
         document.refresh_from_db()
-        if document.processing_status in {
-            MedicalDocument.ProcessingStatus.TEXT_EXTRACTED,
-            MedicalDocument.ProcessingStatus.FAILED,
-        }:
+        if (
+            hasattr(document, "document_text")
+            or document.processing_status == MedicalDocument.ProcessingStatus.FAILED
+        ):
             break
         time.sleep(1)
-    if document.processing_status != MedicalDocument.ProcessingStatus.TEXT_EXTRACTED:
+    if (
+        document.processing_status == MedicalDocument.ProcessingStatus.FAILED
+        or not hasattr(document, "document_text")
+    ):
         raise RuntimeError(
             f"OCR did not complete; final status={document.processing_status}."
         )
-    detail = client.get(f"/api/v1/documents/{document.uuid}/")
+    detail = client.get(f"/api/v1/documents/{document.uuid}/", HTTP_HOST="localhost")
     extracted = document.document_text
     print(
         json.dumps(

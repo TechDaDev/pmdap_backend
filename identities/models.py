@@ -75,6 +75,8 @@ class IdentityDocument(UUIDModel):
     reviewed_unique_card_body_number = models.CharField(
         max_length=128, blank=True, default=""
     )
+    reviewed_issue_date = models.DateField(null=True, blank=True)
+    reviewed_expiry_date = models.DateField(null=True, blank=True)
     # Optimistic-concurrency version for reviewed-value writes. Every
     # review-fields save increments it; clients must send the current version.
     review_version = models.PositiveIntegerField(default=0)

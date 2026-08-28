@@ -87,7 +87,16 @@ def submit_account_claim(validated_data):
                     data["date_of_birth"], profile.date_of_birth
                 ),
                 document_number_comparison=_comparison(
-                    data["identity_document_number"], current_document.document_number
+                    data["identity_document_number"],
+                    (
+                        (
+                            current_document.national_number
+                            or current_document.document_number
+                        )
+                        if current_document.document_type
+                        == IdentityDocument.DocumentType.UNIFIED_NATIONAL_CARD
+                        else current_document.document_number
+                    ),
                 ),
             )
             ClaimIdentityEvidence.objects.create(

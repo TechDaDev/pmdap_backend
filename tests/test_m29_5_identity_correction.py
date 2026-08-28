@@ -7,6 +7,7 @@ concurrency and security.
 
 Synthetic data only. No real PII.
 """
+
 import io
 import uuid
 
@@ -82,6 +83,8 @@ def make_identity_document(
     national_number="NAT-9",
     family_number="FAM-100",
     card_body="BODY-1",
+    issue_date="2024-01-02",
+    expiry_date="2034-01-01",
     verification_status=IdentityDocument.VerificationStatus.PENDING,
 ):
     owner = UserFactory(
@@ -109,6 +112,8 @@ def make_identity_document(
         national_number=national_number,
         family_number=family_number,
         unique_card_body_number=card_body,
+        issue_date=issue_date,
+        expiry_date=expiry_date,
         issuing_country="IQ",
         front_image=front,
         back_image=back,
@@ -289,9 +294,7 @@ class TestSaveCorrections:
             corrections=_corrections(given_name="Ahmad"),
             review_version=0,
         )
-        corr = IdentityFieldCorrection.objects.get(
-            document=doc, field="given_name"
-        )
+        corr = IdentityFieldCorrection.objects.get(document=doc, field="given_name")
         assert corr.original_value == "Ahmed"
         assert corr.reviewed_value == "Ahmad"
         assert corr.source == IdentityFieldCorrection.Source.REVIEWER_CORRECTION
@@ -326,6 +329,23 @@ class TestSaveCorrections:
         doc.refresh_from_db()
         assert doc.verification_status == IdentityDocument.VerificationStatus.PENDING
 
+    def test_issue_and_expiry_are_staged_without_authoritative_mutation(self):
+        agent = make_user(role=User.Role.IDENTITY_VERIFICATION_AGENT)
+        doc, _, _ = make_identity_document()
+
+        update_identity_review_fields(
+            actor=agent,
+            document=doc,
+            corrections={"issue_date": "2024-02-03", "expiry_date": "2035-02-02"},
+            review_version=0,
+        )
+
+        doc.refresh_from_db()
+        assert doc.issue_date.isoformat() == "2024-01-02"
+        assert doc.expiry_date.isoformat() == "2034-01-01"
+        assert doc.reviewed_issue_date.isoformat() == "2024-02-03"
+        assert doc.reviewed_expiry_date.isoformat() == "2035-02-02"
+
 
 class TestApprovePromotes:
     def test_approve_promotes_reviewed_to_profile_and_document(self):
@@ -347,8 +367,7 @@ class TestApprovePromotes:
         approved = approve_identity_document(document=doc, agent=agent)
         profile.refresh_from_db()
         assert (
-            approved.verification_status
-            == IdentityDocument.VerificationStatus.VERIFIED
+            approved.verification_status == IdentityDocument.VerificationStatus.VERIFIED
         )
         assert profile.given_name == "Ahmad"
         assert profile.father_name == "Aly"
@@ -382,6 +401,22 @@ class TestApprovePromotes:
         approve_identity_document(document=doc, agent=agent)
         profile.refresh_from_db()
         assert profile.grandfather_name == "Husein"
+
+    def test_approve_promotes_reviewed_issue_and_expiry_dates(self):
+        agent = make_user(role=User.Role.IDENTITY_VERIFICATION_AGENT)
+        doc, _, _ = make_identity_document()
+        update_identity_review_fields(
+            actor=agent,
+            document=doc,
+            corrections={"issue_date": "2024-02-03", "expiry_date": "2035-02-02"},
+            review_version=0,
+        )
+
+        approve_identity_document(document=doc, agent=agent)
+
+        doc.refresh_from_db()
+        assert doc.issue_date.isoformat() == "2024-02-03"
+        assert doc.expiry_date.isoformat() == "2035-02-02"
 
 
 class TestReject:
@@ -514,6 +549,40 @@ class TestVerifiedCorrection:
             action=AuditLog.Action.IDENTITY_VERIFIED_FIELDS_CORRECTED
         ).exists()
 
+    def test_verified_issue_expiry_correction_requires_reason_and_persists(self):
+        agent = make_user(role=User.Role.IDENTITY_VERIFICATION_AGENT)
+        doc, _, _ = make_identity_document(
+            verification_status=IdentityDocument.VerificationStatus.VERIFIED
+        )
+
+        corrected = correct_verified_identity(
+            actor=agent,
+            document=doc,
+            corrections={"issue_date": "2024-02-03", "expiry_date": "2035-02-02"},
+            reason_category="OCR_CORRECTION",
+            review_version=0,
+        )
+
+        corrected.refresh_from_db()
+        assert corrected.issue_date.isoformat() == "2024-02-03"
+        assert corrected.expiry_date.isoformat() == "2035-02-02"
+        assert IdentityFieldCorrection.objects.filter(
+            document=doc,
+            field="issue_date",
+            reason_category="OCR_CORRECTION",
+        ).exists()
+
+    def test_issue_expiry_order_is_validated_before_save(self):
+        agent = make_user(role=User.Role.IDENTITY_VERIFICATION_AGENT)
+        doc, _, _ = make_identity_document()
+        with pytest.raises(DjangoValidationError):
+            update_identity_review_fields(
+                actor=agent,
+                document=doc,
+                corrections={"issue_date": "2035-01-01"},
+                review_version=0,
+            )
+
     def test_verified_correction_same_values_rejected(self):
         agent = make_user(role=User.Role.IDENTITY_VERIFICATION_AGENT)
         doc, _, _ = make_identity_document(
@@ -626,6 +695,13 @@ class TestApi:
         assert data["review_version"] == 0
         assert data["review_fields"]["given_name"]["original"] == "Ahmed"
         assert data["review_fields"]["given_name"]["corrected"] is False
+        assert data["review_fields"]["issue_date"]["original"] == "2024-01-02"
+        assert data["review_fields"]["expiry_date"]["original"] == "2034-01-01"
+        assert data["issue_date"] == "2024-01-02"
+        assert data["expiry_date"] == "2034-01-01"
+        assert data["national_number"] == "NAT-9"
+        assert data["card_body_number"] == "BODY-1"
+        assert data["family_number"] == "FAM-100"
         assert "review_fields" in data["available_actions"]
         assert "approve" in data["available_actions"]
         assert "correct_verified" not in data["available_actions"]
@@ -732,9 +808,7 @@ class TestOpsConsole:
         agent = make_user(role=User.Role.IDENTITY_VERIFICATION_AGENT, staff=True)
         client.force_login(agent)
         doc, _, _ = make_identity_document()
-        resp = client.get(
-            reverse("admin:ops_verification_review", args=[doc.pk])
-        )
+        resp = client.get(reverse("admin:ops_verification_review", args=[doc.pk]))
         assert resp.status_code == 200
         assert b"reviewer correction" in resp.content.lower()
         assert b"review_version" in resp.content
@@ -758,9 +832,7 @@ class TestOpsConsole:
         doc, _, _ = make_identity_document(
             verification_status=IdentityDocument.VerificationStatus.VERIFIED
         )
-        resp = client.get(
-            reverse("admin:ops_verification_review", args=[doc.pk])
-        )
+        resp = client.get(reverse("admin:ops_verification_review", args=[doc.pk]))
         assert resp.status_code == 200
         assert b"Correct verified identity" in resp.content
 

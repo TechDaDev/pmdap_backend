@@ -60,7 +60,10 @@ def _native_pdf_upload():
 def _ocr_image_upload():
     image = Image.new("RGB", (1500, 420), "white")
     draw = ImageDraw.Draw(image)
-    font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 58)
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 58)
+    except OSError:
+        font = ImageFont.load_default(size=58)
     draw.text((60, 70), "Synthetic Medical Report", fill="black", font=font)
     draw.text((60, 220), "Report Date: 14/03/2026", fill="black", font=font)
     content = io.BytesIO()

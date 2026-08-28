@@ -118,6 +118,8 @@ class RegistrationIdentitySerializer(
     unique_card_body_number = serializers.CharField(
         max_length=128, required=False, allow_blank=True, default=""
     )
+    issue_date = serializers.DateField(required=False, allow_null=True)
+    expiry_date = serializers.DateField(required=False, allow_null=True)
     # Structured patronymic components (Arabic names are natural input; only
     # whitespace is normalized). `full_name` is derived server-side.
     name = serializers.CharField(max_length=255)
@@ -171,6 +173,23 @@ class RegistrationIdentitySerializer(
         # Direct ownership requires an adult patient; the HUMAN-CONFIRMED DOB
         # is authoritative here.
         return PatientProfileInputSerializer().validate_date_of_birth(value)
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        issue = attrs.get("issue_date")
+        expiry = attrs.get("expiry_date")
+        if issue and expiry and expiry <= issue:
+            raise serializers.ValidationError(
+                {"expiry_date": ["Expiry date must be after issue date."]}
+            )
+        body = attrs.get("unique_card_body_number", "").strip()
+        supplied = attrs.get("document_number", "").strip()
+        national = attrs.get("national_card_number", "").strip()
+        if not body and supplied != national:
+            body = supplied
+            attrs["unique_card_body_number"] = body
+        attrs["document_number"] = body
+        return attrs
 
     def validate_nationality(self, value):
         return PatientProfileInputSerializer().validate_nationality(value)

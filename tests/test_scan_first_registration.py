@@ -5,20 +5,18 @@ H12345678 / 999999999999 / 1990-05-17 ...). Real owner card values never
 appear. OCR is faked: ``registration.tasks._run_ocr_and_extract`` returns a
 synthetic payload, so no PaddleOCR runs.
 """
+
 import hashlib
 import io
 
 import pytest
-from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import override_settings
 from PIL import Image
 
 from accounts.models import User
 from identities.models import IdentityDocument, IdentityFile
 from patients.models import PatientProfile
 from registration.models import RegistrationIdentityExtractionJob
-from registration.services import issue_registration_job
 
 EXTRACT = "/api/v1/auth/register/identity/extract/"
 REGISTER = "/api/v1/auth/register/"
@@ -40,7 +38,11 @@ def synthetic_payload():
         "document_type": "UNIFIED_NATIONAL_CARD",
         "extractor_version": "identity-v1",
         "fields": {
-            "name": {"value": "SYNTHNAME", "confidence": 0.9, "source": "FRONT_PRINTED"},
+            "name": {
+                "value": "SYNTHNAME",
+                "confidence": 0.9,
+                "source": "FRONT_PRINTED",
+            },
             "mother_name": {
                 "value": "SYNTHMOTHER",
                 "confidence": 0.9,
@@ -52,7 +54,7 @@ def synthetic_payload():
                 "source": "FRONT_PRINTED",
             },
             "document_number": {
-                "value": "999999999999",
+                "value": "H12345678",
                 "confidence": 0.95,
                 "source": "FRONT_PRINTED",
             },
@@ -78,6 +80,16 @@ def synthetic_payload():
                 "confidence": 1.0,
                 "source": "DOCUMENT_TYPE",
             },
+            "issue_date": {
+                "value": "2024-02-03",
+                "confidence": 0.9,
+                "source": "BACK_PRINTED",
+            },
+            "expiry_date": {
+                "value": "2034-02-02",
+                "confidence": 0.9,
+                "source": "BACK_PRINTED",
+            },
         },
         "warnings": [],
         "mrz": {"detected": True, "valid": False, "checks_passed": False},
@@ -89,10 +101,12 @@ def confirmed_identity(job_id, token):
         "job_id": str(job_id),
         "job_token": token,
         "document_type": "UNIFIED_NATIONAL_CARD",
-        "document_number": "999999999999",
+        "document_number": "H12345678",
         "national_card_number": "999999999999",
         "family_number": "TESTFAMILY123456",
         "unique_card_body_number": "H12345678",
+        "issue_date": "2024-02-03",
+        "expiry_date": "2034-02-02",
         "name": "SYNTHNAME",
         "father_name": "SYNTHFATHER",
         "grandfather_name": "SYNTHGRANDFATHER",
@@ -138,6 +152,7 @@ def _auth(user):
 # PUBLIC EXTRACTION
 # --------------------------------------------------------------------------- #
 
+
 @pytest.mark.django_db
 def test_extract_public_no_jwt_required(api_client):
     resp = api_client.post(
@@ -157,9 +172,7 @@ def test_extract_public_no_jwt_required(api_client):
 
 @pytest.mark.django_db
 def test_extract_rejects_bad_image(api_client):
-    bad = SimpleUploadedFile(
-        "bad.txt", b"not an image", content_type="text/plain"
-    )
+    bad = SimpleUploadedFile("bad.txt", b"not an image", content_type="text/plain")
     resp = api_client.post(
         EXTRACT,
         {
@@ -204,6 +217,7 @@ def test_extract_throttle_scope(api_client):
 # CAPABILITY
 # --------------------------------------------------------------------------- #
 
+
 @pytest.mark.django_db
 def test_token_not_stored_plaintext(api_client):
     resp = api_client.post(
@@ -218,9 +232,9 @@ def test_token_not_stored_plaintext(api_client):
     job = RegistrationIdentityExtractionJob.objects.get(uuid=data["job_id"])
     assert job.capability_digest != data["job_token"]
     assert len(job.capability_digest) == 64
-    assert job.capability_digest == hashlib.sha256(
-        data["job_token"].encode()
-    ).hexdigest()
+    assert (
+        job.capability_digest == hashlib.sha256(data["job_token"].encode()).hexdigest()
+    )
 
 
 @pytest.mark.django_db
@@ -314,6 +328,7 @@ def test_poll_correct_token_success(api_client):
 # TTL / CLEANUP
 # --------------------------------------------------------------------------- #
 
+
 @pytest.mark.django_db
 def test_expired_job_poll_410(api_client):
     resp = api_client.post(
@@ -351,8 +366,9 @@ def test_cleanup_sweep_removes_expired(api_client):
         },
     )
     data = resp.json()["data"]
-    from django.utils import timezone
     from datetime import timedelta
+
+    from django.utils import timezone
 
     job = RegistrationIdentityExtractionJob.objects.get(uuid=data["job_id"])
     job.expires_at = timezone.now() - timedelta(seconds=1)
@@ -369,6 +385,7 @@ def test_cleanup_sweep_removes_expired(api_client):
 # --------------------------------------------------------------------------- #
 # FINAL REGISTER
 # --------------------------------------------------------------------------- #
+
 
 def _successful_job(api_client):
     resp = api_client.post(
@@ -444,15 +461,18 @@ def test_scan_first_register_full_lifecycle(api_client):
     doc = IdentityDocument.objects.get(patient=profile)
     assert doc.verification_status == IdentityDocument.VerificationStatus.PENDING
     assert doc.status == IdentityDocument.LifecycleStatus.CURRENT
-    assert doc.document_number == "999999999999"
+    assert doc.document_number == "H12345678"
+    assert doc.national_number == "999999999999"
     assert doc.family_number == "TESTFAMILY123456"
     assert doc.unique_card_body_number == "H12345678"
     assert doc.issuing_country == "IQ"
+    assert doc.issue_date.isoformat() == "2024-02-03"
+    assert doc.expiry_date.isoformat() == "2034-02-02"
     assert IdentityFile.objects.count() == 2
 
     # Events + audit recorded.
-    from identities.models import IdentityDocumentEvent
     from audit.models import AuditLog
+    from identities.models import IdentityDocumentEvent
 
     assert IdentityDocumentEvent.objects.filter(document=doc).exists()
     assert AuditLog.objects.filter(action=AuditLog.Action.ACCOUNT_CREATED).exists()
@@ -525,9 +545,10 @@ def test_bad_confirmed_fields_do_not_consume_job(api_client):
     job_id, token = _successful_job(api_client)
     resp = _register(api_client, job_id, token, nationality="XYZ")
     assert resp.status_code == 400
-    assert RegistrationIdentityExtractionJob.objects.get(
-        uuid=job_id
-    ).status != RegistrationIdentityExtractionJob.Status.FINALIZED
+    assert (
+        RegistrationIdentityExtractionJob.objects.get(uuid=job_id).status
+        != RegistrationIdentityExtractionJob.Status.FINALIZED
+    )
 
 
 @pytest.mark.django_db
@@ -594,9 +615,10 @@ def test_wrong_document_type_mismatch(api_client):
     job_id, token = _successful_job(api_client)
     resp = _register(api_client, job_id, token, document_type="PASSPORT")
     assert resp.status_code in (400, 409)
-    assert RegistrationIdentityExtractionJob.objects.get(
-        uuid=job_id
-    ).status != RegistrationIdentityExtractionJob.Status.FINALIZED
+    assert (
+        RegistrationIdentityExtractionJob.objects.get(uuid=job_id).status
+        != RegistrationIdentityExtractionJob.Status.FINALIZED
+    )
 
 
 @pytest.mark.django_db
@@ -618,10 +640,8 @@ def test_four_identifiers_stay_distinct(api_client):
         format="json",
     )
     assert resp.status_code == 201
-    doc = IdentityDocument.objects.get(
-        patient__user__email="distinct@example.invalid"
-    )
-    assert doc.document_number == "DOC-ALPHA-1"
+    doc = IdentityDocument.objects.get(patient__user__email="distinct@example.invalid")
+    assert doc.document_number == "H-DELTA-4"
     assert doc.national_number == "NAT-BETA-2"
     assert doc.family_number == "FAM-GAMMA-3"
     assert doc.unique_card_body_number == "H-DELTA-4"
@@ -641,9 +661,10 @@ def test_governorate_required_for_scan_first(api_client):
         format="json",
     )
     assert resp.status_code == 400
-    assert RegistrationIdentityExtractionJob.objects.get(
-        uuid=job_id
-    ).status != RegistrationIdentityExtractionJob.Status.FINALIZED
+    assert (
+        RegistrationIdentityExtractionJob.objects.get(uuid=job_id).status
+        != RegistrationIdentityExtractionJob.Status.FINALIZED
+    )
 
 
 @pytest.mark.django_db
@@ -671,9 +692,10 @@ def test_empty_structured_name_rejected(api_client):
     job_id, token = _successful_job(api_client)
     resp = _register(api_client, job_id, token, name="   ")
     assert resp.status_code == 400
-    assert RegistrationIdentityExtractionJob.objects.get(
-        uuid=job_id
-    ).status != RegistrationIdentityExtractionJob.Status.FINALIZED
+    assert (
+        RegistrationIdentityExtractionJob.objects.get(uuid=job_id).status
+        != RegistrationIdentityExtractionJob.Status.FINALIZED
+    )
 
 
 @pytest.mark.django_db
@@ -686,9 +708,10 @@ def test_duplicate_national_card_number_rejected(api_client):
     resp = _register(api_client, job2_id, token2, email="dup@example.invalid")
     assert resp.status_code == 400
     assert not User.objects.filter(email="dup@example.invalid").exists()
-    assert RegistrationIdentityExtractionJob.objects.get(
-        uuid=job2_id
-    ).status != RegistrationIdentityExtractionJob.Status.FINALIZED
+    assert (
+        RegistrationIdentityExtractionJob.objects.get(uuid=job2_id).status
+        != RegistrationIdentityExtractionJob.Status.FINALIZED
+    )
 
 
 @pytest.mark.django_db
@@ -794,7 +817,7 @@ def test_arabic_names_alphanumeric_family_and_g_body_accepted(api_client):
     assert profile.grandfather_name == "احمد"
     assert profile.governorate == "NAJAF"
     doc = IdentityDocument.objects.get(patient=profile)
-    assert doc.document_number == "198060266608"
+    assert doc.document_number == "G12345678"
     assert doc.family_number == "1012L0M10290019303"
     assert doc.unique_card_body_number == "G12345678"
 
@@ -827,9 +850,7 @@ def test_registration_pending_card_blocks_normal_duplicate(api_client):
         return buf.getvalue()
 
     api_client.credentials(HTTP_AUTHORIZATION=_auth(user))
-    front = SimpleUploadedFile(
-        "front.jpg", _jpeg("FRONT"), content_type="image/jpeg"
-    )
+    front = SimpleUploadedFile("front.jpg", _jpeg("FRONT"), content_type="image/jpeg")
     back = SimpleUploadedFile("back.jpg", _jpeg("BACK"), content_type="image/jpeg")
     resp = api_client.post(
         "/api/v1/identity-documents/",

@@ -151,16 +151,11 @@ def get_job_for_poll(*, job_id, token):
 def _check_identity_conflicts(identity):
     """Safe duplicate checks for the Iraqi card identifiers.
 
-    The visible card number (national_card_number, carried in
-    document_number/national_number by the backend alias) and the physical
+    The visible national number and physical
     body number are per-card unique. family_number is INTENTIONALLY not unique
     (family members share it) and is never checked — family-linking is Step 3.
     """
-    card = (
-        identity.get("national_card_number")
-        or identity.get("document_number")
-        or ""
-    ).strip()
+    card = (identity.get("national_card_number") or "").strip()
     body = (identity.get("unique_card_body_number") or "").strip()
     if not card and not body:
         return
@@ -298,6 +293,8 @@ def finalize_scan_first_registration(
                 "unique_card_body_number", ""
             ),
             "issuing_country": "IQ",
+            "issue_date": registration_identity.get("issue_date"),
+            "expiry_date": registration_identity.get("expiry_date"),
         },
         front_validated=front_validated,
         back_validated=back_validated,

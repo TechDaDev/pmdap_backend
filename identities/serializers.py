@@ -1,5 +1,6 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils import timezone
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from identities.models import IdentityDocument, IdentityFieldCorrection
@@ -160,6 +161,16 @@ class IdentityDocumentInputSerializer(RejectUnknownFieldsMixin, serializers.Seri
                 errors["issuing_country"] = [
                     "Unified National Card must be issued by Iraq."
                 ]
+            # Never alias the national number into generic document_number.
+            # Existing manual clients may still provide the card-body value in
+            # document_number; preserve it in the explicit field.
+            body_number = attrs.get("unique_card_body_number", "").strip()
+            supplied_document_number = attrs.get("document_number", "").strip()
+            national_number = attrs.get("national_number", "").strip()
+            if not body_number and supplied_document_number != national_number:
+                body_number = supplied_document_number
+                attrs["unique_card_body_number"] = body_number
+            attrs["document_number"] = body_number
         elif "issuing_country" not in attrs:
             errors["issuing_country"] = ["This field is required."]
         if document_type == IdentityDocument.DocumentType.PASSPORT:
@@ -199,6 +210,9 @@ class IdentityDocumentSummarySerializer(serializers.ModelSerializer):
 class IdentityDocumentDetailSerializer(IdentityDocumentSummarySerializer):
     available_images = serializers.SerializerMethodField()
     replaces = serializers.UUIDField(source="replaces_id", read_only=True)
+    card_body_number = serializers.CharField(
+        source="unique_card_body_number", read_only=True
+    )
 
     class Meta(IdentityDocumentSummarySerializer.Meta):
         fields = IdentityDocumentSummarySerializer.Meta.fields + (
@@ -206,6 +220,7 @@ class IdentityDocumentDetailSerializer(IdentityDocumentSummarySerializer):
             "national_number",
             "family_number",
             "unique_card_body_number",
+            "card_body_number",
             "verified_at",
             "rejection_reason",
             "available_images",
@@ -281,9 +296,11 @@ class VerificationDetailSerializer(IdentityDocumentDetailSerializer):
             "available_actions",
         )
 
+    @extend_schema_field(serializers.BooleanField)
     def get_has_corrections(self, obj):
         return obj.field_corrections.exists()
 
+    @extend_schema_field(IdentityCorrectionProvenanceSerializer(many=True))
     def get_corrections(self, obj):
         return [
             {
@@ -297,6 +314,9 @@ class VerificationDetailSerializer(IdentityDocumentDetailSerializer):
             for c in obj.field_corrections.all()
         ]
 
+    @extend_schema_field(
+        serializers.DictField(child=IdentityReviewFieldSerializer(read_only=True))
+    )
     def get_review_fields(self, obj):
         from identities.corrections import (
             PROFILE_FIELDS,
@@ -318,6 +338,7 @@ class VerificationDetailSerializer(IdentityDocumentDetailSerializer):
             }
         return out
 
+    @extend_schema_field(serializers.ListField(child=serializers.CharField()))
     def get_available_actions(self, obj):
         from identities.models import IdentityDocument
 

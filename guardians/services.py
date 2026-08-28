@@ -413,6 +413,8 @@ def _authoritative_extraction_identity(job):
     national_number = _extracted_value(payload, "national_card_number")
     family_number = _extracted_value(payload, "family_number")
     card_body_number = _extracted_value(payload, "unique_card_body_number")
+    issue_date = _extracted_value(payload, "issue_date")
+    expiry_date = _extracted_value(payload, "expiry_date")
     missing = {
         field: ["Authoritative extraction did not produce this field."]
         for field, value in (
@@ -429,11 +431,13 @@ def _authoritative_extraction_identity(job):
     serializer = IdentityDocumentInputSerializer(
         data={
             "document_type": IdentityDocument.DocumentType.UNIFIED_NATIONAL_CARD,
-            "document_number": national_number,
+            "document_number": card_body_number,
             "national_number": national_number,
             "family_number": family_number,
             "unique_card_body_number": card_body_number,
             "issuing_country": "IQ",
+            "issue_date": issue_date or None,
+            "expiry_date": expiry_date or None,
             "extraction_job_id": str(job.uuid),
         }
     )

@@ -322,6 +322,9 @@ SPECTACULAR_SETTINGS = {
             "claims.models.ClaimIdentityEvidence.DocumentType"
         ),
         "IdentityDocumentTypeEnum": "identities.models.IdentityDocument.DocumentType",
+        "RegistrationIdentityDocumentTypeEnum": (
+            ("UNIFIED_NATIONAL_CARD", "UNIFIED_NATIONAL_CARD"),
+        ),
         "MedicalDocumentTypeEnum": "documents.models.MedicalDocument.DocumentType",
         "IdentityDocumentLifecycleStatusEnum": (
             "identities.models.IdentityDocument.LifecycleStatus"

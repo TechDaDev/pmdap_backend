@@ -13,6 +13,7 @@ Three explicit authority layers (never conflated):
 Never silently overwrite OCR evidence. Never let a correction promote to the
 profile before approval. Never let a rejection promote corrections.
 """
+
 from __future__ import annotations
 
 import unicodedata
@@ -55,6 +56,8 @@ DOCUMENT_FIELDS = {
     "national_number",
     "family_number",
     "unique_card_body_number",
+    "issue_date",
+    "expiry_date",
 }
 REVIEWABLE_FIELDS = PROFILE_FIELDS | DOCUMENT_FIELDS
 
@@ -65,10 +68,9 @@ NUMBER_FIELDS = {
     "family_number",
     "unique_card_body_number",
 }
+DATE_FIELDS = {"date_of_birth", "issue_date", "expiry_date"}
 
-_REASON_CATEGORIES = {
-    c.value for c in IdentityFieldCorrection.ReasonCategory
-}
+_REASON_CATEGORIES = {c.value for c in IdentityFieldCorrection.ReasonCategory}
 
 
 def _as_text(value) -> str:
@@ -135,21 +137,26 @@ def validate_review_value(field: str, value):
             raise ValidationError(f"{field} contains unsupported characters.")
         return value
 
-    if field == "date_of_birth":
+    if field in DATE_FIELDS:
+        if field in {"issue_date", "expiry_date"} and value in (None, ""):
+            return None
         if isinstance(value, str):
             try:
                 value = date.fromisoformat(value)
             except ValueError:
-                raise ValidationError(
-                    "date_of_birth must be a valid date."
-                ) from None
+                raise ValidationError(f"{field} must be a valid date.") from None
         if not isinstance(value, date):
-            raise ValidationError("date_of_birth must be a valid date.")
+            raise ValidationError(f"{field} must be a valid date.")
         today = timezone.localdate()
-        if value > today:
-            raise ValidationError("Date of birth cannot be in the future.")
-        if value.year < 1900:
+        if field in {"date_of_birth", "issue_date"} and value > today:
+            label = "Date of birth" if field == "date_of_birth" else "Issue date"
+            raise ValidationError(f"{label} cannot be in the future.")
+        if field == "date_of_birth" and value.year < 1900:
             raise ValidationError("Date of birth is out of a reasonable range.")
+        if field == "issue_date" and value.year < 1900:
+            raise ValidationError("Issue date is out of a reasonable range.")
+        if field == "expiry_date" and value.year < 1900:
+            raise ValidationError("Expiry date is out of a reasonable range.")
         return value
 
     if field == "sex":
@@ -187,7 +194,7 @@ def _original_value(document, profile, field: str) -> str:
 
 
 def _typed_value(field: str, value):
-    if field == "date_of_birth":
+    if field in DATE_FIELDS:
         return value  # date object
     return _as_text(value)
 
@@ -291,12 +298,21 @@ def _staged_document(document, corrections, profile):
         reviewed_text = _as_text(reviewed)
         if not reviewed_text:
             # Empty staged value: no correction (original stays authoritative).
-            setattr(document, f"reviewed_{field}", "")
+            setattr(document, f"reviewed_{field}", None if field in DATE_FIELDS else "")
             continue
         if reviewed_text != original:
             changed.append((field, original, reviewed_text))
         setattr(document, f"reviewed_{field}", reviewed)
     return changed
+
+
+def _validate_document_date_order(document):
+    issue = document.reviewed_issue_date or document.issue_date
+    expiry = document.reviewed_expiry_date or document.expiry_date
+    if issue and expiry and expiry <= issue:
+        from django.core.exceptions import ValidationError
+
+        raise ValidationError("Expiry date must be after issue date.")
 
 
 def update_identity_review_fields(*, actor, document, corrections, review_version):
@@ -310,12 +326,9 @@ def update_identity_review_fields(*, actor, document, corrections, review_versio
             .select_related("patient")
             .get(pk=document.pk)
         )
-        profile = PatientProfile.objects.select_for_update().get(
-            pk=document.patient_id
-        )
+        profile = PatientProfile.objects.select_for_update().get(pk=document.patient_id)
         if (
-            document.verification_status
-            != IdentityDocument.VerificationStatus.PENDING
+            document.verification_status != IdentityDocument.VerificationStatus.PENDING
             or document.status != IdentityDocument.LifecycleStatus.CURRENT
         ):
             raise IdentityTransitionConflict()
@@ -324,11 +337,10 @@ def update_identity_review_fields(*, actor, document, corrections, review_versio
 
         normalized = _validate_correction_payload(corrections)
         changed = _staged_document(document, normalized, profile)
+        _validate_document_date_order(document)
 
         document.review_version += 1
-        reviewed_fields = tuple(
-            f"reviewed_{field}" for field in REVIEWABLE_FIELDS
-        )
+        reviewed_fields = tuple(f"reviewed_{field}" for field in REVIEWABLE_FIELDS)
         document.save(update_fields=reviewed_fields + ("review_version", "updated_at"))
 
         for field, original, reviewed in changed:
@@ -379,12 +391,9 @@ def correct_verified_identity(
             .select_related("patient")
             .get(pk=document.pk)
         )
-        profile = PatientProfile.objects.select_for_update().get(
-            pk=document.patient_id
-        )
+        profile = PatientProfile.objects.select_for_update().get(pk=document.patient_id)
         if (
-            document.verification_status
-            != IdentityDocument.VerificationStatus.VERIFIED
+            document.verification_status != IdentityDocument.VerificationStatus.VERIFIED
             or document.status != IdentityDocument.LifecycleStatus.CURRENT
         ):
             raise IdentityTransitionConflict()
@@ -393,6 +402,7 @@ def correct_verified_identity(
 
         normalized = _validate_correction_payload(corrections)
         changed = _staged_document(document, normalized, profile)
+        _validate_document_date_order(document)
         if not changed:
             from django.core.exceptions import ValidationError
 
@@ -407,9 +417,7 @@ def correct_verified_identity(
             profile.save()
         if changed_document:
             _check_correction_conflicts(document, profile)
-        reviewed_fields = tuple(
-            f"reviewed_{field}" for field in REVIEWABLE_FIELDS
-        )
+        reviewed_fields = tuple(f"reviewed_{field}" for field in REVIEWABLE_FIELDS)
         document.save(
             update_fields=reviewed_fields
             + tuple(DOCUMENT_FIELDS)

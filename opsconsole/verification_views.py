@@ -55,6 +55,8 @@ FIELD_LABELS = {
     "national_number": "National number",
     "family_number": "Family number",
     "unique_card_body_number": "Card-body number",
+    "issue_date": "Issue date",
+    "expiry_date": "Expiry date",
 }
 
 _PENDING = IdentityDocument.VerificationStatus.PENDING
@@ -286,7 +288,9 @@ def verification_reject(request, document_uuid):
                 ),
             )
         try:
-            reject_identity_document(document=document, agent=request.user, reason=reason)
+            reject_identity_document(
+                document=document, agent=request.user, reason=reason
+            )
             messages.success(request, "Identity document rejected.")
             return _redirect_after_action(document)
         except (IdentityTransitionConflict, VerificationAgentRequired) as exc:

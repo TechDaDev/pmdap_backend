@@ -53,6 +53,8 @@ def _successful_card_job(user):
                 "national_card_number": {"value": "100000000001"},
                 "unique_card_body_number": {"value": "A10000001"},
                 "family_number": {"value": "SYNTH-FAMILY-100"},
+                "issue_date": {"value": "2024-02-03"},
+                "expiry_date": {"value": "2034-02-02"},
             },
             "warnings": [],
             "mrz": {"detected": False, "valid": False, "checks_passed": False},
@@ -95,10 +97,12 @@ def test_minor_card_uses_structured_names_and_server_extraction(api_client):
     assert minor.father_name == "SyntheticFather"
     assert minor.grandfather_name == "SyntheticGrandfather"
     card = document_model().objects.get(patient=minor)
-    assert card.document_number == "100000000001"
+    assert card.document_number == "A10000001"
     assert card.national_number == "100000000001"
     assert card.unique_card_body_number == "A10000001"
     assert card.family_number == "SYNTH-FAMILY-100"
+    assert card.issue_date.isoformat() == "2024-02-03"
+    assert card.expiry_date.isoformat() == "2034-02-02"
 
 
 def test_minor_card_rejects_client_forged_family_number(api_client):

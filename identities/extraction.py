@@ -5,12 +5,14 @@ label-anchor heuristics. No LLM, no cloud OCR, no medical interpretation.
 
 Extraction NEVER persists an IdentityDocument and NEVER returns raw OCR text.
 """
+
 from __future__ import annotations
 
 import logging
 import os
 import re
 import threading
+from datetime import date
 
 from django.utils import timezone
 
@@ -91,7 +93,7 @@ def ocr_text(image_path: str) -> list[str]:
         return []
 
 
-_DATE_RE = re.compile(r"\b((?:19|20)\d{2})[-/.](\d{1,2})[-/.](\d{1,2})\b")
+_DATE_RE = re.compile(r"(?<!\d)((?:19|20)\d{2})[-/.](\d{1,2})[-/.](\d{1,2})(?!\d)")
 _ISSUE_LABELS = ("issue date", "date of issue", "issued on", "date issued")
 _MRZ_LINES = re.compile(r"^[A-Z0-9<]{30,44}$")
 
@@ -147,9 +149,7 @@ _FRONT_NAME_GROUPS = [
         ("الاسم", "اناو"),
     ),
 ]
-_NAME_LABELS = tuple(
-    label for _, labels, _ in _FRONT_NAME_GROUPS for label in labels
-)
+_NAME_LABELS = tuple(label for _, labels, _ in _FRONT_NAME_GROUPS for label in labels)
 _FATHER_LABELS = ("الاب", "اباوك", "باوك", "بابك", "بابه", "ابت", "باو")
 _GRANDFATHER_LABELS = ("ابابير", "ابير", "الحد", "الجد", "باپير", "اباير")
 _MOTHER_LABELS = ("الام", "ادايك", "ردايك", "دايك", "داتك", "مادر")
@@ -177,8 +177,29 @@ _FAMILY_LABELS = (
 _CONNECTOR_TOKENS = frozenset({"اناو", "اتو", "ناو", "انازناو", "اركمز", "اركز"})
 
 _HAMZA_MAP = str.maketrans("أإآٱ", "اااا")
-_HARAKAT = "\u0640\u064B\u064C\u064D\u064E\u064F\u0650\u0651\u0652"
+_HARAKAT = "\u0640\u064b\u064c\u064d\u064e\u064f\u0650\u0651\u0652"
 _HIDDEN = "\u200c\u200d\u200f\u200e"
+_DIGIT_TRANSLATION = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
+
+_ISSUE_DATE_LABELS = (
+    "تاريخ الاصدار",
+    "تأريخ الاصدار",
+    "تاريخ إصدار",
+    "date of issue",
+    "issue date",
+    "روژى دەرچوون",
+    "ڕۆژی دەرچوون",
+)
+_EXPIRY_DATE_LABELS = (
+    "تاريخ النفاذ",
+    "تأريخ النفاذ",
+    "تاريخ الانتهاء",
+    "تأريخ الانتهاء",
+    "date of expiry",
+    "expiry date",
+    "روژى بەسەرچوون",
+    "ڕۆژی بەسەرچوون",
+)
 
 _CARD_NUMBER_RE = re.compile(r"\b[0-9]{10,13}[A-Z0-9]?\b")
 # Iraqi card body number: one valid uppercase Latin letter + 8 digits
@@ -214,8 +235,8 @@ def _norm_ar(text: str) -> str:
 
 
 def _contains_any(line: str, labels) -> bool:
-    norm = _norm_ar(line)
-    return any(label in norm for label in labels)
+    norm = _norm_ar(line).lower()
+    return any(_norm_ar(label).lower() in norm for label in labels)
 
 
 def _value_after_label(text: str, labels) -> str:
@@ -242,7 +263,7 @@ def _value_after_label(text: str, labels) -> str:
                 *sorted(_CONNECTOR_TOKENS, key=len, reverse=True),
             ):
                 if t.startswith(pre) and len(t) > len(pre):
-                    t = t[len(pre):]
+                    t = t[len(pre) :]
                     if not t:
                         t = ""
                     break
@@ -422,13 +443,14 @@ def _canonical_sex(value: str) -> str | None:
 
 
 def _parse_date_str(text: str) -> str | None:
-    m = _DATE_RE.search(text)
+    m = _DATE_RE.search(text.translate(_DIGIT_TRANSLATION))
     if not m:
         return None
-    year, month, day = int(m.group(1)), int(m.group(2)), int(m.group(3))
-    if month < 1 or month > 12 or day < 1 or day > 31:
+    try:
+        parsed = date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    except ValueError:
         return None
-    return f"{year:04d}-{month:02d}-{day:02d}"
+    return parsed.isoformat()
 
 
 def _extract_dates(lines) -> list[str]:
@@ -447,14 +469,64 @@ def _extract_dob(roi_dob) -> str | None:
     return min(past) if past else None
 
 
-def _extract_issue_expiry(roi_dates):
-    today = timezone.localdate().isoformat()
-    past, future = [], []
-    for d in _extract_dates(roi_dates):
-        (future if d > today else past).append(d)
-    issue = max(past) if past else None
-    expiry = min(future) if future else None
-    return issue, expiry
+def _extract_labeled_date(lines, labels) -> str | None:
+    """Extract one printed date only when its explicit label is present.
+
+    Supports same-line, glued-label and label-then-value OCR. It never assigns
+    dates by chronology or derives one date from another.
+    """
+    pending = False
+    for text, _ in lines:
+        if _contains_any(text, labels):
+            value = _parse_date_str(text)
+            if value:
+                return value
+            pending = True
+            continue
+        if pending:
+            value = _parse_date_str(text)
+            if value:
+                return value
+            if _contains_any(text, _ISSUE_DATE_LABELS + _EXPIRY_DATE_LABELS):
+                pending = False
+    return None
+
+
+def _extract_issue_expiry(back_lines, roi_dates):
+    """Map printed issue/expiry rows without chronological inference.
+
+    Full-card Arabic OCR reliably reads row labels while Latin ROI OCR reads
+    their digits. Direct same-stream matches win. Otherwise, pair recognized
+    label order with ROI date order only when counts match exactly.
+    """
+    issue = _extract_labeled_date(
+        back_lines, _ISSUE_DATE_LABELS
+    ) or _extract_labeled_date(roi_dates, _ISSUE_DATE_LABELS)
+    expiry = _extract_labeled_date(
+        back_lines, _EXPIRY_DATE_LABELS
+    ) or _extract_labeled_date(roi_dates, _EXPIRY_DATE_LABELS)
+    if issue and expiry:
+        return issue, expiry
+
+    label_order = []
+    for text, _ in back_lines:
+        if _contains_any(text, _ISSUE_DATE_LABELS):
+            label_order.append("issue")
+        elif _contains_any(text, _EXPIRY_DATE_LABELS):
+            label_order.append("expiry")
+    values = _extract_dates(roi_dates)
+    if (
+        len(label_order) != 2
+        or len(values) != 2
+        or set(label_order)
+        != {
+            "issue",
+            "expiry",
+        }
+    ):
+        return issue, expiry
+    paired = dict(zip(label_order, values, strict=True))
+    return issue or paired["issue"], expiry or paired["expiry"]
 
 
 def _extract_blood_group(roi_blood) -> str | None:
@@ -538,7 +610,7 @@ def _extract_family_number(roi_family, back, body_number):
 
 
 def _mrz_lines(lines: list[str]) -> list[str]:
-    return [l for l in lines if _MRZ_LINES.match(l)]
+    return [line for line in lines if _MRZ_LINES.match(line)]
 
 
 def _find_issue_date(lines: list[str]) -> tuple[str | None, float]:
@@ -698,9 +770,7 @@ def extract_iraqi_national_card(
     elif sex:
         fields["sex"] = _candidate(sex, _clamp_conf(sex_conf, 0.9), SRC_FRONT)
     elif mrz_sex:
-        fields["sex"] = _candidate(
-            "MALE" if mrz_sex == "M" else "FEMALE", 0.9, SRC_MRZ
-        )
+        fields["sex"] = _candidate("MALE" if mrz_sex == "M" else "FEMALE", 0.9, SRC_MRZ)
     else:
         warnings.append(W_FIELD_MISSING)
 
@@ -711,7 +781,7 @@ def extract_iraqi_national_card(
     else:
         warnings.append(W_BLOOD_GROUP_NOT_FOUND)
 
-    # ---- national / card number (FRONT) + document_number alias ----
+    # ---- national number (FRONT) ----
     card_value, card_conf, normalized = _extract_card_number(front)
     if card_value:
         conf = _clamp_conf(card_conf, 0.7)
@@ -719,9 +789,6 @@ def extract_iraqi_national_card(
             conf = round(max(conf - 0.15, 0.3), 3)
             warnings.append(W_OCR_NORMALIZED)
         fields["national_card_number"] = _candidate(card_value, conf, SRC_FRONT)
-        # Compatibility alias: IdentityDocument persists this in
-        # document_number today. Schema unchanged this milestone.
-        fields["document_number"] = _candidate(card_value, conf, SRC_FRONT)
     else:
         warnings.append(W_FIELD_MISSING)
 
@@ -750,14 +817,16 @@ def extract_iraqi_national_card(
         fields["unique_card_body_number"] = _candidate(
             body_value or mrz_body, body_conf, source, cross_check=cross
         )
+        fields["card_body_number"] = fields["unique_card_body_number"]
+        # Generic document_number keeps passport semantics. For an Iraqi card,
+        # the machine-readable document number is the physical card-body code.
+        fields["document_number"] = fields["unique_card_body_number"]
     else:
         warnings.append(W_FIELD_MISSING)
 
     # ---- date of birth (BACK printed + MRZ) ----
     dob_printed = _extract_dob(roi.get("ROI_DOB", []))
-    mrz_dob = (
-        mrz_result.date_of_birth.isoformat() if mrz_result.date_of_birth else None
-    )
+    mrz_dob = mrz_result.date_of_birth.isoformat() if mrz_result.date_of_birth else None
     dob_mrz_low = "date_of_birth" in mrz_result.low_confidence_fields
     if dob_printed and mrz_dob:
         if dob_printed == mrz_dob:
@@ -779,12 +848,10 @@ def extract_iraqi_national_card(
         warnings.append(W_FIELD_MISSING)
 
     # ---- issue / expiry (BACK printed; expiry cross-checked with MRZ) ----
-    issue_value, expiry_printed = _extract_issue_expiry(roi.get("ROI_DATES", []))
+    issue_value, expiry_printed = _extract_issue_expiry(back, roi.get("ROI_DATES", []))
     if issue_value:
         fields["issue_date"] = _candidate(issue_value, 0.7, SRC_BACK)
-    expiry_mrz = (
-        mrz_result.expiry_date.isoformat() if mrz_result.expiry_date else None
-    )
+    expiry_mrz = mrz_result.expiry_date.isoformat() if mrz_result.expiry_date else None
     if expiry_mrz and expiry_printed:
         if expiry_mrz == expiry_printed:
             fields["expiry_date"] = _candidate(
@@ -803,9 +870,7 @@ def extract_iraqi_national_card(
         fields["expiry_date"] = _candidate(expiry_printed, 0.7, SRC_BACK)
 
     # ---- family number (BACK printed; MISSING safer than WRONG) ----
-    family_value = _extract_family_number(
-        roi.get("ROI_FAMILY", []), back, body_value
-    )
+    family_value = _extract_family_number(roi.get("ROI_FAMILY", []), back, body_value)
     if family_value:
         fields["family_number"] = _candidate(family_value, 0.85, SRC_BACK)
     else:
@@ -814,9 +879,7 @@ def extract_iraqi_national_card(
     return fields, warnings, mrz_result
 
 
-def extract_identity(
-    document_type: str, lines
-) -> tuple[dict, list[str], dict]:
+def extract_identity(document_type: str, lines) -> tuple[dict, list[str], dict]:
     """Run deterministic extraction. Returns (fields, warnings, mrz_summary).
 
     ``lines`` accepts either a list of plain strings (legacy: each line is
@@ -847,11 +910,15 @@ def extract_identity(
             "checks_passed": result.checks_passed,
         }
     else:
-        return {}, [W_UNSUPPORTED_LAYOUT], {
-            "detected": False,
-            "valid": False,
-            "checks_passed": False,
-        }
+        return (
+            {},
+            [W_UNSUPPORTED_LAYOUT],
+            {
+                "detected": False,
+                "valid": False,
+                "checks_passed": False,
+            },
+        )
     return fields, warnings, mrz_summary
 
 

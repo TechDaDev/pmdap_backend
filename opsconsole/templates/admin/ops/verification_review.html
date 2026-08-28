@@ -72,7 +72,11 @@
     <tr><th>{% translate 'Issuing country' %}</th><td>{{ document.issuing_country }}</td></tr>
     <tr><th>{% translate 'Issue date' %}</th><td>{{ document.issue_date|default:"&mdash;" }}</td></tr>
     <tr><th>{% translate 'Expiry date' %}</th><td>{{ document.expiry_date|default:"&mdash;" }}</td></tr>
-    <tr><th>{% translate 'Document number' %}</th><td>{{ document.document_number }}</td></tr>
+    {% if document.document_type == 'UNIFIED_NATIONAL_CARD' %}
+      {% if document.unique_card_body_number %}<tr><th>{% translate 'Card body number' %}</th><td>{{ document.unique_card_body_number }}</td></tr>{% endif %}
+    {% else %}
+      <tr><th>{% translate 'Document number' %}</th><td>{{ document.document_number }}</td></tr>
+    {% endif %}
     {% if document.national_number %}<tr><th>{% translate 'National number' %}</th><td>{{ document.national_number }}</td></tr>{% endif %}
     {% if document.family_number %}<tr><th>{% translate 'Family number' %}</th><td>{{ document.family_number }}</td></tr>{% endif %}
     {% if document.replaces %}
@@ -133,7 +137,7 @@
                   <option value="{{ value }}" {% if rf.reviewed == value %}selected{% endif %}>{{ label }}</option>
                 {% endfor %}
               </select>
-            {% elif rf.field == "date_of_birth" %}
+            {% elif rf.field == "date_of_birth" or rf.field == "issue_date" or rf.field == "expiry_date" %}
               <input type="date" id="field_{{ rf.field }}" name="{{ rf.field }}" value="{{ rf.reviewed }}" aria-label="{{ rf.label }}">
             {% else %}
               <input type="text" id="field_{{ rf.field }}" name="{{ rf.field }}" value="{{ rf.reviewed }}" aria-label="{{ rf.label }}">
@@ -201,7 +205,7 @@
                   <option value="{{ value }}" {% if rf.reviewed == value %}selected{% endif %}>{{ label }}</option>
                 {% endfor %}
               </select>
-            {% elif rf.field == "date_of_birth" %}
+            {% elif rf.field == "date_of_birth" or rf.field == "issue_date" or rf.field == "expiry_date" %}
               <input type="date" id="vc_field_{{ rf.field }}" name="{{ rf.field }}" value="{{ rf.reviewed }}" aria-label="{{ rf.label }}">
             {% else %}
               <input type="text" id="vc_field_{{ rf.field }}" name="{{ rf.field }}" value="{{ rf.reviewed }}" aria-label="{{ rf.label }}">

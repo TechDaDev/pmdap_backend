@@ -177,14 +177,18 @@ def test_second_pending_national_card_returns_409_conflict(api_client):
     first_back = SimpleUploadedFile(
         "back.jpg", jpeg_bytes(), content_type="image/jpeg"
     )
-    first_resp = api_client.post(COLLECTION, payload(first, first_back), format="multipart")
+    first_resp = api_client.post(
+        COLLECTION, payload(first, first_back), format="multipart"
+    )
     assert first_resp.status_code == 201
 
     second = SimpleUploadedFile("front.jpg", jpeg_bytes(), content_type="image/jpeg")
     second_back = SimpleUploadedFile(
         "back.jpg", jpeg_bytes(), content_type="image/jpeg"
     )
-    response = api_client.post(COLLECTION, payload(second, second_back), format="multipart")
+    response = api_client.post(
+        COLLECTION, payload(second, second_back), format="multipart"
+    )
 
     captured = error_envelope(response)
     assert captured["status"] == 409
@@ -204,8 +208,9 @@ def _submit(api_client, *, document_number="CARD-002", family_number="FAM-002"):
             front,
             back,
             document_number=document_number,
-            national_number=document_number,
+            national_number="NAT-001",
             family_number=family_number,
+            unique_card_body_number=document_number,
         ),
         format="multipart",
     )
@@ -226,7 +231,10 @@ def test_second_verified_national_card_returns_409(api_client):
     doc = identity_document_model().objects.get(patient__user=user)
     approve_identity_document(document=doc, agent=agent)
     doc.refresh_from_db()
-    assert doc.verification_status == identity_document_model().VerificationStatus.VERIFIED
+    assert (
+        doc.verification_status
+        == identity_document_model().VerificationStatus.VERIFIED
+    )
 
     captured = error_envelope(_submit(api_client, document_number="CARD-003"))
     assert captured["status"] == 409
@@ -265,7 +273,10 @@ def test_rejected_card_allows_resubmission(api_client):
     doc = identity_document_model().objects.get(patient__user=user)
     reject_identity_document(document=doc, agent=agent, reason="synthetic test")
     doc.refresh_from_db()
-    assert doc.verification_status == identity_document_model().VerificationStatus.REJECTED
+    assert (
+        doc.verification_status
+        == identity_document_model().VerificationStatus.REJECTED
+    )
 
     # Resubmission allowed while REJECTED.
     assert _submit(api_client, document_number="CARD-003").status_code == 201
@@ -273,7 +284,10 @@ def test_rejected_card_allows_resubmission(api_client):
     assert docs.count() == 2
     new_doc = docs.get(document_number="CARD-003")
     assert new_doc.status == identity_document_model().LifecycleStatus.CURRENT
-    assert new_doc.verification_status == identity_document_model().VerificationStatus.PENDING
+    assert (
+        new_doc.verification_status
+        == identity_document_model().VerificationStatus.PENDING
+    )
 
     # Locked again after the fresh PENDING card.
     captured = error_envelope(_submit(api_client, document_number="CARD-004"))

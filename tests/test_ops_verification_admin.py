@@ -35,7 +35,7 @@ def private_identity_storage(settings, tmp_path):
 
 def make_user(*, role=User.Role.PATIENT, staff=False, email=None):
     user = UserFactory(
-        email=email or ("op-%s@example.com" % uuid.uuid4().hex[:10]),
+        email=email or f"op-{uuid.uuid4().hex[:10]}@example.com",
         role=role,
     )
     if staff:
@@ -44,10 +44,19 @@ def make_user(*, role=User.Role.PATIENT, staff=False, email=None):
     return user
 
 
-def make_identity_document(*, document_number="DOC-123", national_number="NAT-9",
-                           family_number="", replaces=None, back=True):
+def make_identity_document(
+    *,
+    document_number="DOC-123",
+    national_number="NAT-9",
+    family_number="",
+    card_body="BODY-123",
+    issue_date="2024-01-02",
+    expiry_date="2034-01-01",
+    replaces=None,
+    back=True,
+):
     owner = UserFactory(
-        email="patient-op-%s@example.com" % uuid.uuid4().hex[:10],
+        email=f"patient-op-{uuid.uuid4().hex[:10]}@example.com",
         role=User.Role.PATIENT,
     )
     profile = create_patient_profile(
@@ -72,6 +81,9 @@ def make_identity_document(*, document_number="DOC-123", national_number="NAT-9"
         document_number=document_number,
         national_number=national_number,
         family_number=family_number,
+        unique_card_body_number=card_body,
+        issue_date=issue_date,
+        expiry_date=expiry_date,
         issuing_country="IQ",
         front_image=front,
         back_image=back,
@@ -157,7 +169,9 @@ class TestQueue:
         make_identity_document()  # pending
         done = make_identity_document()[0]
         done.verification_status = IdentityDocument.VerificationStatus.VERIFIED
-        done.verified_by = make_user(role=User.Role.IDENTITY_VERIFICATION_AGENT, staff=True)
+        done.verified_by = make_user(
+            role=User.Role.IDENTITY_VERIFICATION_AGENT, staff=True
+        )
         done.save(update_fields=("verification_status", "verified_by"))
 
         user = make_user(role=User.Role.IDENTITY_VERIFICATION_AGENT, staff=True)
@@ -169,7 +183,9 @@ class TestQueue:
         assert response.content.count(b"Operations Test Patient") == 1
 
     def test_queue_does_not_render_document_numbers(self, client):
-        make_identity_document(document_number="SECRET-DOCNUM-123", national_number="SECRET-NAT-456")
+        make_identity_document(
+            document_number="SECRET-DOCNUM-123", national_number="SECRET-NAT-456"
+        )
         user = make_user(role=User.Role.IDENTITY_VERIFICATION_AGENT, staff=True)
         login(client, user)
         response = client.get(reverse("admin:ops_verification_queue"))
@@ -196,6 +212,10 @@ class TestReviewAndImages:
         assert response.status_code == 200
         assert b"DOCNUM-777" in response.content
         assert b"NATNUM-888" in response.content
+        assert b"BODY-123" in response.content
+        assert b"Document number</th>" not in response.content
+        assert b"Issue date" in response.content
+        assert b"Expiry date" in response.content
         assert b"Operations Test Patient" in response.content
 
     def test_agent_can_stream_front_image(self, client):
@@ -241,17 +261,13 @@ class TestApprove:
         doc.refresh_from_db()
         assert doc.verification_status == IdentityDocument.VerificationStatus.VERIFIED
         assert doc.verified_by_id == agent.pk
-        assert (
-            IdentityDocumentEvent.objects.filter(
-                document=doc, event_type=IdentityDocumentEvent.EventType.VERIFIED
-            ).exists()
-        )
-        assert (
-            AuditLog.objects.filter(
-                action=AuditLog.Action.IDENTITY_DOCUMENT_VERIFIED,
-                resource_uuid=doc.uuid,
-            ).exists()
-        )
+        assert IdentityDocumentEvent.objects.filter(
+            document=doc, event_type=IdentityDocumentEvent.EventType.VERIFIED
+        ).exists()
+        assert AuditLog.objects.filter(
+            action=AuditLog.Action.IDENTITY_DOCUMENT_VERIFIED,
+            resource_uuid=doc.uuid,
+        ).exists()
         doc.patient.refresh_from_db()
         assert doc.patient.identity_status == PatientProfile.IdentityStatus.VERIFIED
 
@@ -260,22 +276,34 @@ class TestApprove:
         second, _ = make_identity_document()
         agent = make_user(role=User.Role.IDENTITY_VERIFICATION_AGENT, staff=True)
         login(client, agent)
-        response = client.post(reverse("admin:ops_verification_approve", args=[first.pk]))
+        response = client.post(
+            reverse("admin:ops_verification_approve", args=[first.pk])
+        )
         assert response.status_code == 302
-        assert reverse("admin:ops_verification_review", args=[second.pk]) in response["Location"]
+        assert (
+            reverse("admin:ops_verification_review", args=[second.pk])
+            in response["Location"]
+        )
 
     def test_approve_replacement_marks_previous_replaced(self, client):
         previous, _ = make_identity_document(document_number="OLD-1")
         previous.verification_status = IdentityDocument.VerificationStatus.VERIFIED
         previous.save(update_fields=("verification_status",))
-        replacement, _ = make_identity_document(document_number="NEW-1", replaces=previous)
+        replacement, _ = make_identity_document(
+            document_number="NEW-1", replaces=previous
+        )
         agent = make_user(role=User.Role.IDENTITY_VERIFICATION_AGENT, staff=True)
         login(client, agent)
-        response = client.post(reverse("admin:ops_verification_approve", args=[replacement.pk]))
+        response = client.post(
+            reverse("admin:ops_verification_approve", args=[replacement.pk])
+        )
         assert response.status_code == 302
         replacement.refresh_from_db()
         previous.refresh_from_db()
-        assert replacement.verification_status == IdentityDocument.VerificationStatus.VERIFIED
+        assert (
+            replacement.verification_status
+            == IdentityDocument.VerificationStatus.VERIFIED
+        )
         assert previous.status == IdentityDocument.LifecycleStatus.REPLACED
 
     def test_superuser_can_mutate(self, client):
@@ -291,18 +319,16 @@ class TestApprove:
         assert doc.verification_status == IdentityDocument.VerificationStatus.VERIFIED
         assert doc.verified_by_id == root.pk
         # Audit + event actor is the real superuser (role untouched).
-        assert (
-            AuditLog.objects.filter(
-                action=AuditLog.Action.IDENTITY_DOCUMENT_VERIFIED,
-                resource_uuid=doc.uuid,
-                actor=root,
-            ).exists()
-        )
-        assert (
-            IdentityDocumentEvent.objects.filter(
-                document=doc, event_type=IdentityDocumentEvent.EventType.VERIFIED, actor=root
-            ).exists()
-        )
+        assert AuditLog.objects.filter(
+            action=AuditLog.Action.IDENTITY_DOCUMENT_VERIFIED,
+            resource_uuid=doc.uuid,
+            actor=root,
+        ).exists()
+        assert IdentityDocumentEvent.objects.filter(
+            document=doc,
+            event_type=IdentityDocumentEvent.EventType.VERIFIED,
+            actor=root,
+        ).exists()
         doc.patient.refresh_from_db()
         assert doc.patient.identity_status == PatientProfile.IdentityStatus.VERIFIED
         assert root.role == User.Role.PATIENT  # role never mutated
@@ -335,11 +361,15 @@ class TestApprove:
         root.save(update_fields=("is_staff", "is_superuser"))
         login(client, root)
         assert (
-            client.get(reverse("admin:ops_verification_review", args=[doc.pk])).status_code
+            client.get(
+                reverse("admin:ops_verification_review", args=[doc.pk])
+            ).status_code
             == 200
         )
         assert (
-            client.get(reverse("admin:ops_identity_image_front", args=[doc.pk])).status_code
+            client.get(
+                reverse("admin:ops_identity_image_front", args=[doc.pk])
+            ).status_code
             == 200
         )
 
@@ -348,7 +378,9 @@ class TestApprove:
         staff = make_user(staff=True, email="staff-approve@example.com")
         login(client, staff)
         assert (
-            client.post(reverse("admin:ops_verification_approve", args=[doc.pk])).status_code
+            client.post(
+                reverse("admin:ops_verification_approve", args=[doc.pk])
+            ).status_code
             == 403
         )
         doc.refresh_from_db()
@@ -404,12 +436,10 @@ class TestReject:
         assert doc.verification_status == IdentityDocument.VerificationStatus.REJECTED
         assert doc.status == IdentityDocument.LifecycleStatus.REVOKED
         assert doc.rejection_reason == "Document appears altered"
-        assert (
-            AuditLog.objects.filter(
-                action=AuditLog.Action.IDENTITY_DOCUMENT_REJECTED,
-                resource_uuid=doc.uuid,
-            ).exists()
-        )
+        assert AuditLog.objects.filter(
+            action=AuditLog.Action.IDENTITY_DOCUMENT_REJECTED,
+            resource_uuid=doc.uuid,
+        ).exists()
 
     def test_reject_get_renders_form(self, client):
         doc, _ = make_identity_document()
