@@ -100,3 +100,29 @@ locking out existing production users.
 - New registrations can no longer reach identity OCR without a verified email.
 - Existing users are unaffected (grandfathered).
 - OTP purpose remains server-chosen; M31A security properties are preserved.
+
+## Delivery readiness (verified against production)
+
+The M31B E2E surfaced a delivery-provider gap, not a code gap:
+
+- The Resend account (`techda.info@gmail.com`) is in Resend **test/sandbox
+  mode**: the default sender `onboarding@resend.dev` only delivers to the
+  account owner's own address. Sending to any other recipient returns a 403
+  `validation_error` until a domain is verified at resend.com/domains.
+- Probing candidate senders (`noreply@techda.dev`, `pmdap@techda.dev`,
+  `pmdap@techda.info`, `pmdap.dev`) all return "domain is not verified".
+- The project's legacy SMTP host (`premium86.web-hosting.com`, port 587/465)
+  delivers from outside but the Railway web container's egress **times out** on
+  both ports, so it is not a viable production OTP path.
+- The delivery resolver (`registration.email_services.get_otp_delivery_service`)
+  uses Resend when `RESEND_API_KEY` is set, else Django's SMTP backend; the
+  web container can reach `api.resend.com`, so Resend remains the intended
+  provider.
+
+**Required before real-user delivery works:** verify a sending domain in the
+Resend account (Domains → Add domain → add SPF/DKIM/DMARC → verify), then set
+`RESEND_FROM_EMAIL` on Railway to an address on that verified domain (e.g.
+`noreply@<domain>`). Until then `start/` returns 503
+`registration_email_delivery_failed` for non-owner recipients — a deliberate
+generic error (no provider detail leak). Delivery failures log only the
+exception type/message via `_log_delivery_cause` (never the OTP or target).
