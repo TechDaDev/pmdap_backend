@@ -13,6 +13,17 @@ class OtpDeliveryResult:
     provider_message_id: str
 
 
+def get_otp_delivery_service():
+    """Resend when configured, otherwise Django's configured email backend.
+
+    Central resolver so every OTP purpose (verification, reset, change) uses
+    the same production/test delivery behavior.
+    """
+    if getattr(settings, "RESEND_API_KEY", ""):
+        return ResendOtpDeliveryService()
+    return DjangoOtpDeliveryService()
+
+
 class OtpDeliveryService(ABC):
     @abstractmethod
     def send_email_otp(self, *, target, code, expires_minutes, locale="en"):

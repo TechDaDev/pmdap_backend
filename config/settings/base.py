@@ -325,6 +325,10 @@ REST_FRAMEWORK = {
         "password_reset_request": "5/hour",
         "password_reset_verify": "10/minute",
         "password_reset_confirm": "10/minute",
+        # M32B authenticated password change (current password + email OTP).
+        "password_change_request": "5/hour",
+        "password_change_verify": "10/minute",
+        "password_change_confirm": "10/minute",
         # Public pre-registration OCR runs expensive PaddleOCR: aggressive,
         # dedicated anonymous scopes.
         "registration_identity_extract": "10/minute",

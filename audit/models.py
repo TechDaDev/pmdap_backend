@@ -37,6 +37,15 @@ class AuditLog(UUIDModel):
             "PASSWORD_RESET_COMPLETED",
             "Password reset completed",
         )
+        PASSWORD_CHANGE_OTP_REQUESTED = (
+            "PASSWORD_CHANGE_OTP_REQUESTED",
+            "Password change OTP requested",
+        )
+        PASSWORD_CHANGE_OTP_VERIFIED = (
+            "PASSWORD_CHANGE_OTP_VERIFIED",
+            "Password change OTP verified",
+        )
+        PASSWORD_CHANGED = "PASSWORD_CHANGED", "Password changed"
         # Registration email verification
         REGISTRATION_SESSION_CREATED = (
             "REGISTRATION_SESSION_CREATED",

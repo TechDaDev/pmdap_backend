@@ -1,6 +1,11 @@
 from django.urls import path
 
 from accounts.api import LoginView, LogoutView, MeView, RefreshView, RegisterView
+from accounts.password_change_api import (
+    PasswordChangeConfirmView,
+    PasswordChangeRequestView,
+    PasswordChangeVerifyView,
+)
 from accounts.password_reset_api import (
     PasswordResetConfirmView,
     PasswordResetRequestView,
@@ -30,6 +35,21 @@ urlpatterns = [
         "password-reset/confirm/",
         PasswordResetConfirmView.as_view(),
         name="password-reset-confirm",
+    ),
+    path(
+        "password-change/request/",
+        PasswordChangeRequestView.as_view(),
+        name="password-change-request",
+    ),
+    path(
+        "password-change/verify/",
+        PasswordChangeVerifyView.as_view(),
+        name="password-change-verify",
+    ),
+    path(
+        "password-change/confirm/",
+        PasswordChangeConfirmView.as_view(),
+        name="password-change-confirm",
     ),
     path(
         "activate-claimed-account/",

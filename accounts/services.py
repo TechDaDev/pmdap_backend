@@ -88,6 +88,15 @@ def issue_tokens(*, email, password):
     ):
         raise InvalidCredentials()
 
+    return issue_tokens_for_user(user)
+
+
+def issue_tokens_for_user(user):
+    """Issue a fresh token pair carrying the user's current session version.
+
+    Used by login and by flows that rotate sessions (e.g. password change)
+    without requiring the password again.
+    """
     refresh = RefreshToken.for_user(user)
     refresh[SESSION_VERSION_CLAIM] = user.auth_session_version
     return {"access": str(refresh.access_token), "refresh": str(refresh)}

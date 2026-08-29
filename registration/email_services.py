@@ -6,6 +6,7 @@ client. The session stores only a SHA-256 capability digest of the
 high-entropy ``session_token``; the raw token is returned to the client once.
 OTP codes are never logged or stored here.
 """
+
 import hashlib
 import secrets
 from datetime import timedelta
@@ -15,7 +16,7 @@ from django.utils import timezone
 
 from audit.models import AuditLog
 from audit.services import record_audit
-from otp.delivery import DjangoOtpDeliveryService, ResendOtpDeliveryService
+from otp.delivery import get_otp_delivery_service
 from otp.exceptions import OtpError
 from otp.models import OtpPurpose, OtpTargetState
 from otp.services import issue_otp, verify_otp
@@ -51,13 +52,6 @@ def mask_email(email: str) -> str:
     return f"{masked_local}@{domain}"
 
 
-def get_otp_delivery_service():
-    """Resend when configured, otherwise Django's configured email backend."""
-    if getattr(settings, "RESEND_API_KEY", ""):
-        return ResendOtpDeliveryService()
-    return DjangoOtpDeliveryService()
-
-
 def _client_source(request):
     if request is None:
         return None
@@ -69,9 +63,7 @@ def load_session_for_capability(token: str) -> RegistrationSession:
     if not token:
         raise RegistrationSessionNotFound()
     try:
-        session = RegistrationSession.objects.get(
-            capability_digest=_digest(token)
-        )
+        session = RegistrationSession.objects.get(capability_digest=_digest(token))
     except RegistrationSession.DoesNotExist:
         raise RegistrationSessionNotFound() from None
     if not _constant_time_equal(_digest(token), session.capability_digest):
@@ -193,12 +185,9 @@ def get_registration_status(*, session_token):
         "session_id": str(session.uuid),
         "masked_email": mask_email(session.email),
         "status": session.status,
-        "email_verified": session.status
-        == RegistrationSession.Status.EMAIL_VERIFIED,
+        "email_verified": session.status == RegistrationSession.Status.EMAIL_VERIFIED,
         "resend_at": resend_at.isoformat() if resend_at else None,
-        "expires_at": (
-            session.expires_at.isoformat() if session.expires_at else None
-        ),
+        "expires_at": (session.expires_at.isoformat() if session.expires_at else None),
     }
 
 
