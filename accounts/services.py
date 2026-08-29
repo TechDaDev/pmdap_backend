@@ -8,6 +8,8 @@ from audit.services import record_audit
 from common.exceptions import InvalidCredentials
 from patients.services import create_patient_profile
 
+SESSION_VERSION_CLAIM = "session_version"
+
 
 def normalize_email(email):
     return get_user_model().objects.normalize_email(email)
@@ -87,4 +89,13 @@ def issue_tokens(*, email, password):
         raise InvalidCredentials()
 
     refresh = RefreshToken.for_user(user)
+    refresh[SESSION_VERSION_CLAIM] = user.auth_session_version
     return {"access": str(refresh.access_token), "refresh": str(refresh)}
+
+
+def token_matches_current_session(token, user):
+    try:
+        token_version = int(token.get(SESSION_VERSION_CLAIM, 0))
+    except (TypeError, ValueError):
+        return False
+    return token_version == user.auth_session_version

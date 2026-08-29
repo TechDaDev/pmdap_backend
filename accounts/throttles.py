@@ -21,3 +21,27 @@ class LoginRateThrottle(DynamicScopedRateThrottle):
     def get_cache_key(self, request, view):
         view.throttle_scope = self.scope
         return super().get_cache_key(request, view)
+
+
+class PasswordResetRequestRateThrottle(DynamicScopedRateThrottle):
+    scope = "password_reset_request"
+
+    def get_cache_key(self, request, view):
+        view.throttle_scope = self.scope
+        return super().get_cache_key(request, view)
+
+
+class PasswordResetVerifyRateThrottle(DynamicScopedRateThrottle):
+    scope = "password_reset_verify"
+
+    def get_cache_key(self, request, view):
+        view.throttle_scope = self.scope
+        return super().get_cache_key(request, view)
+
+
+class PasswordResetConfirmRateThrottle(DynamicScopedRateThrottle):
+    scope = "password_reset_confirm"
+
+    def get_cache_key(self, request, view):
+        view.throttle_scope = self.scope
+        return super().get_cache_key(request, view)

@@ -34,6 +34,10 @@ class User(AbstractUser):
     # completes with a verified email (M31B). Null for grandfathered accounts.
     email_verified_at = models.DateTimeField(null=True, blank=True)
     phone_verified = models.BooleanField(default=False)
+    # Monotonic server-side session generation. JWTs carry the current value;
+    # password recovery increments it so every previously issued access and
+    # refresh token becomes unusable immediately.
+    auth_session_version = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

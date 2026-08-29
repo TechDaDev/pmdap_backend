@@ -297,9 +297,15 @@ def consume_otp_authorization(*, token, purpose, channel, target, account=None):
         except OtpAuthorization.DoesNotExist as exc:
             raise InvalidOtp("Invalid or unavailable OTP authorization.") from exc
         challenge = authorization.challenge
+        superseded = OtpChallenge.objects.filter(
+            state=challenge.state,
+            created_at__gt=challenge.created_at,
+            invalidated_at__isnull=True,
+        ).exists()
         if (
             authorization.consumed_at is not None
             or authorization.expires_at <= now
+            or superseded
             or challenge.state.purpose != purpose
             or challenge.state.channel != channel
             or challenge.state.target_hash != target_digest

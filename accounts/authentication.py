@@ -2,6 +2,7 @@ from drf_spectacular.extensions import OpenApiAuthenticationExtension
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.exceptions import AuthenticationFailed
 
+from accounts.services import token_matches_current_session
 from common.exceptions import AccountUnavailable
 
 
@@ -13,6 +14,8 @@ class ActiveAccountJWTAuthentication(JWTAuthentication):
             raise AccountUnavailable() from exc
 
         if user.status != user.Status.ACTIVE:
+            raise AccountUnavailable()
+        if not token_matches_current_session(validated_token, user):
             raise AccountUnavailable()
         return user
 

@@ -163,9 +163,7 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
-STATICFILES_STORAGE = (
-    "whitenoise.storage.CompressedManifestStaticFilesStorage"
-)
+STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
 IDENTITY_FILE_ROOT = Path(
@@ -175,9 +173,7 @@ IDENTITY_FILE_MAX_BYTES = int(os.getenv("IDENTITY_FILE_MAX_BYTES", 10 * 1024 * 1
 MEDICAL_FILE_ROOT = Path(
     os.getenv("MEDICAL_FILE_ROOT", BASE_DIR / "private" / "medical")
 )
-AVATAR_FILE_ROOT = Path(
-    os.getenv("AVATAR_FILE_ROOT", BASE_DIR / "private" / "avatar")
-)
+AVATAR_FILE_ROOT = Path(os.getenv("AVATAR_FILE_ROOT", BASE_DIR / "private" / "avatar"))
 MEDICAL_FILE_MAX_BYTES = int(os.getenv("MEDICAL_FILE_MAX_BYTES", 25 * 1024 * 1024))
 # 64 megapixels: covers modern phone photos (e.g. 5360x7728 = 41.4MP) while
 # staying well under PIL's decompression-bomb threshold (~89MP), so image-bomb
@@ -238,9 +234,7 @@ LAB_TASK_TIME_LIMIT = int(os.getenv("LAB_TASK_TIME_LIMIT", str(10 * 60)))
 
 # Duplicate-protection content fingerprint key (HMAC-SHA256). Separate from the
 # JWT/SECRET_KEY material; falls back to a SECRET_KEY-derived value when unset.
-DOCUMENT_FINGERPRINT_SECRET = os.getenv(
-    "DOCUMENT_FINGERPRINT_SECRET", ""
-)
+DOCUMENT_FINGERPRINT_SECRET = os.getenv("DOCUMENT_FINGERPRINT_SECRET", "")
 
 
 # Identity extraction staging lifetime. A SUCCESSFUL extraction job keeps its
@@ -287,12 +281,8 @@ SEARCH_QUERY_MAX_CHARS = int(os.getenv("SEARCH_QUERY_MAX_CHARS", "200"))
 OTP_TTL_MINUTES = int(os.getenv("OTP_TTL_MINUTES", "10"))
 OTP_MAX_ATTEMPTS = int(os.getenv("OTP_MAX_ATTEMPTS", "5"))
 OTP_RESEND_COOLDOWN_SECONDS = int(os.getenv("OTP_RESEND_COOLDOWN_SECONDS", "60"))
-OTP_AUTHORIZATION_TTL_MINUTES = int(
-    os.getenv("OTP_AUTHORIZATION_TTL_MINUTES", "5")
-)
-OTP_ISSUE_RATE_WINDOW_SECONDS = int(
-    os.getenv("OTP_ISSUE_RATE_WINDOW_SECONDS", "3600")
-)
+OTP_AUTHORIZATION_TTL_MINUTES = int(os.getenv("OTP_AUTHORIZATION_TTL_MINUTES", "5"))
+OTP_ISSUE_RATE_WINDOW_SECONDS = int(os.getenv("OTP_ISSUE_RATE_WINDOW_SECONDS", "3600"))
 OTP_ISSUE_LIMIT_TARGET = int(os.getenv("OTP_ISSUE_LIMIT_TARGET", "5"))
 OTP_ISSUE_LIMIT_ACCOUNT = int(os.getenv("OTP_ISSUE_LIMIT_ACCOUNT", "10"))
 OTP_ISSUE_LIMIT_SOURCE = int(os.getenv("OTP_ISSUE_LIMIT_SOURCE", "20"))
@@ -332,6 +322,9 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         "auth_register": "5/hour",
         "auth_login": "10/minute",
+        "password_reset_request": "5/hour",
+        "password_reset_verify": "10/minute",
+        "password_reset_confirm": "10/minute",
         # Public pre-registration OCR runs expensive PaddleOCR: aggressive,
         # dedicated anonymous scopes.
         "registration_identity_extract": "10/minute",
@@ -439,15 +432,13 @@ LOGGING = {
 CELERY_BEAT_SCHEDULE = {
     "cleanup-identity-extraction-jobs": {
         "task": "identities.cleanup_identity_extraction_jobs",
-    # The Railway metrics collector is self-rescheduling (no beat process
-    # required); this entry only fires if a `celery beat` is deployed.
-    "ops-railway-collect-metrics": {
-        "task": "ops.railway.collect_metrics",
-        "schedule": max(
-            30, int(os.getenv("RAILWAY_METRICS_SAMPLE_SECONDS", "30"))
-        ),
-        "args": [],
-    },
+        # The Railway metrics collector is self-rescheduling (no beat process
+        # required); this entry only fires if a `celery beat` is deployed.
+        "ops-railway-collect-metrics": {
+            "task": "ops.railway.collect_metrics",
+            "schedule": max(30, int(os.getenv("RAILWAY_METRICS_SAMPLE_SECONDS", "30"))),
+            "args": [],
+        },
         "schedule": int(os.getenv("IDENTITY_STAGING_SWEEP_SECONDS", str(15 * 60))),
         "args": [],
     },

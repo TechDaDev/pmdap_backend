@@ -9,7 +9,11 @@ REDACTED = "[REDACTED]"
 SENSITIVE_KEYS = {
     "password",
     "password_hash",
+    "new_password",
+    "otp",
+    "code",
     "token",
+    "reset_token",
     "access_token",
     "refresh_token",
     "activation_token",

@@ -7,7 +7,12 @@ from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from rest_framework_simplejwt.settings import api_settings
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from accounts.services import issue_tokens, normalize_email, register_account
+from accounts.services import (
+    issue_tokens,
+    normalize_email,
+    register_account,
+    token_matches_current_session,
+)
 from common.exceptions import AccountUnavailable
 from patients.models import PatientProfile
 from patients.serializers import PatientProfileInputSerializer
@@ -103,8 +108,7 @@ class RegisterSerializer(RejectUnknownFieldsMixin, serializers.Serializer):
             raise serializers.ValidationError(
                 {
                     "registration_session": [
-                        "Email verification is required for scan-first "
-                        "registration."
+                        "Email verification is required for scan-first registration."
                     ]
                 }
             )
@@ -142,6 +146,8 @@ def _get_available_user(refresh):
     except (User.DoesNotExist, ValueError, TypeError) as exc:
         raise AccountUnavailable() from exc
     if not user.is_active or user.status != user.Status.ACTIVE:
+        raise AccountUnavailable()
+    if not token_matches_current_session(refresh, user):
         raise AccountUnavailable()
     return user
 
