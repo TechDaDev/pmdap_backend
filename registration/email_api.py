@@ -81,9 +81,10 @@ def _throttled_response(retry_after=None):
 
 
 def _log_delivery_cause(exc):
-    """Temporary M31B diagnostics: log the chained provider/SMTP error.
+    """Log the chained provider/SMTP error behind an OTP delivery failure.
 
-    Logs exception type + message only — never the OTP code or target.
+    Logs exception type + message only — never the OTP code or the target
+    address. Helps ops diagnose provider outages without leaking secrets.
     """
     cause = getattr(exc, "__cause__", None)
     logger.warning(
