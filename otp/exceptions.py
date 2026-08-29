@@ -20,5 +20,9 @@ class OtpDeliveryFailed(OtpError):
     pass
 
 
+class OtpProviderError(OtpError):
+    pass
+
+
 class UnsupportedOtpChannel(OtpError):
     pass

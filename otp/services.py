@@ -14,7 +14,7 @@ from django.utils import timezone
 
 from audit.models import AuditLog
 from audit.services import record_audit
-from otp.delivery import DjangoOtpDeliveryService
+from otp.delivery import ResendOtpDeliveryService
 from otp.exceptions import (
     InvalidOtp,
     OtpCooldown,
@@ -181,7 +181,7 @@ def issue_otp(
             metadata={"purpose": purpose, "channel": channel},
         )
 
-    sender = delivery_service or DjangoOtpDeliveryService()
+    sender = delivery_service or ResendOtpDeliveryService()
     try:
         sender.send_email_otp(
             target=normalized_target,

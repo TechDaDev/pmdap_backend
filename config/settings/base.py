@@ -297,6 +297,9 @@ OTP_ISSUE_LIMIT_TARGET = int(os.getenv("OTP_ISSUE_LIMIT_TARGET", "5"))
 OTP_ISSUE_LIMIT_ACCOUNT = int(os.getenv("OTP_ISSUE_LIMIT_ACCOUNT", "10"))
 OTP_ISSUE_LIMIT_SOURCE = int(os.getenv("OTP_ISSUE_LIMIT_SOURCE", "20"))
 
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
+RESEND_FROM_EMAIL = os.getenv("RESEND_FROM_EMAIL", "onboarding@resend.dev")
+
 EMAIL_BACKEND = os.getenv(
     "EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend"
 )

@@ -1,13 +1,55 @@
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 
+import resend
 from django.conf import settings
 from django.core.mail import send_mail
+
+from otp.exceptions import OtpProviderError
+
+
+@dataclass(frozen=True)
+class OtpDeliveryResult:
+    provider_message_id: str
 
 
 class OtpDeliveryService(ABC):
     @abstractmethod
     def send_email_otp(self, *, target, code, expires_minutes, locale="en"):
         raise NotImplementedError
+
+
+class ResendOtpDeliveryService(OtpDeliveryService):
+    def send_email_otp(self, *, target, code, expires_minutes, locale="en"):
+        api_key = settings.RESEND_API_KEY
+        from_email = settings.RESEND_FROM_EMAIL
+        if not api_key or not from_email:
+            raise OtpProviderError("OTP email delivery unavailable.")
+
+        resend.api_key = api_key
+        params: resend.Emails.SendParams = {
+            "from": from_email,
+            "to": [target],
+            "subject": "PMDAP verification code",
+            "text": (
+                f"PMDAP verification code\n\n{code}\n\n"
+                f"Expires in {expires_minutes} minutes.\n"
+                "Do not share this code."
+            ),
+        }
+        try:
+            response = resend.Emails.send(params)
+        except Exception:
+            raise OtpProviderError("OTP email delivery failed.") from None
+
+        message_id = (
+            response.get("id")
+            if isinstance(response, dict)
+            else getattr(response, "id", None)
+        )
+        if not message_id:
+            raise OtpProviderError("OTP email delivery failed.")
+        return OtpDeliveryResult(provider_message_id=str(message_id))
 
 
 class DjangoOtpDeliveryService(OtpDeliveryService):
