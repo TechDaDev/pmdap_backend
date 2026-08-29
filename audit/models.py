@@ -20,6 +20,11 @@ class AuditLog(UUIDModel):
         ACCOUNT_CLAIM_REJECTED = "ACCOUNT_CLAIM_REJECTED", "Account claim rejected"
         PATIENT_ACCOUNT_LINKED = "PATIENT_ACCOUNT_LINKED", "Patient account linked"
         PATIENT_PROFILE_CREATED = "PATIENT_PROFILE_CREATED", "Patient profile created"
+        OTP_REQUESTED = "OTP_REQUESTED", "OTP requested"
+        OTP_VERIFIED = "OTP_VERIFIED", "OTP verified"
+        OTP_FAILED = "OTP_FAILED", "OTP failed"
+        OTP_LOCKED = "OTP_LOCKED", "OTP locked"
+        OTP_CONSUMED = "OTP_CONSUMED", "OTP consumed"
         # Identity
         IDENTITY_DOCUMENT_UPLOADED = (
             "IDENTITY_DOCUMENT_UPLOADED",

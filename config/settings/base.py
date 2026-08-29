@@ -11,6 +11,13 @@ def env_list(name, default=""):
     ]
 
 
+def env_bool(name, default=False):
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "unsafe-development-only")
 DEBUG = False
 ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1")
@@ -48,6 +55,7 @@ PROJECT_APPS = [
     "archive.apps.ArchiveConfig",
     "facilities.apps.FacilitiesConfig",
     "audit.apps.AuditConfig",
+    "otp.apps.OtpConfig",
     "common.apps.CommonConfig",
 ]
 
@@ -275,6 +283,34 @@ ACCOUNT_CLAIM_ACTIVATION_MINUTES = int(
     os.getenv("ACCOUNT_CLAIM_ACTIVATION_MINUTES", "30")
 )
 SEARCH_QUERY_MAX_CHARS = int(os.getenv("SEARCH_QUERY_MAX_CHARS", "200"))
+
+OTP_TTL_MINUTES = int(os.getenv("OTP_TTL_MINUTES", "10"))
+OTP_MAX_ATTEMPTS = int(os.getenv("OTP_MAX_ATTEMPTS", "5"))
+OTP_RESEND_COOLDOWN_SECONDS = int(os.getenv("OTP_RESEND_COOLDOWN_SECONDS", "60"))
+OTP_AUTHORIZATION_TTL_MINUTES = int(
+    os.getenv("OTP_AUTHORIZATION_TTL_MINUTES", "5")
+)
+OTP_ISSUE_RATE_WINDOW_SECONDS = int(
+    os.getenv("OTP_ISSUE_RATE_WINDOW_SECONDS", "3600")
+)
+OTP_ISSUE_LIMIT_TARGET = int(os.getenv("OTP_ISSUE_LIMIT_TARGET", "5"))
+OTP_ISSUE_LIMIT_ACCOUNT = int(os.getenv("OTP_ISSUE_LIMIT_ACCOUNT", "10"))
+OTP_ISSUE_LIMIT_SOURCE = int(os.getenv("OTP_ISSUE_LIMIT_SOURCE", "20"))
+
+EMAIL_BACKEND = os.getenv(
+    "EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend"
+)
+EMAIL_HOST = os.getenv("EMAIL_HOST", "mail.privateemail.com")
+EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
+EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", True)
+EMAIL_USE_SSL = env_bool("EMAIL_USE_SSL", False)
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "pmdap@techda.dev")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "PMDAP <pmdap@techda.dev>")
+EMAIL_TIMEOUT = int(os.getenv("EMAIL_TIMEOUT", "10"))
+
+if EMAIL_USE_TLS and EMAIL_USE_SSL:
+    raise ValueError("EMAIL_USE_TLS and EMAIL_USE_SSL cannot both be enabled.")
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 

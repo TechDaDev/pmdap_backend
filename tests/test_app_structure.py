@@ -11,6 +11,7 @@ PROJECT_APPS = (
     "archive",
     "facilities",
     "audit",
+    "otp",
     "common",
 )
 
