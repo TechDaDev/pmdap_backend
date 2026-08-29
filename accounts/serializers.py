@@ -37,6 +37,7 @@ class PublicUserSerializer(serializers.ModelSerializer):
             "phone",
             "role",
             "email_verified",
+            "email_verified_at",
             "phone_verified",
             "can_verify_identity",
             "created_at",
@@ -66,6 +67,16 @@ class RegisterSerializer(RejectUnknownFieldsMixin, serializers.Serializer):
     registration_identity = RegistrationIdentitySerializer(
         write_only=True, required=False
     )
+    # M31B email-verification capability. Required for the scan-first path;
+    # the session must be EMAIL_VERIFIED and its email must match ``email``.
+    # The client can never assert verification itself — the flag is derived
+    # server-side from the session row.
+    registration_session = serializers.CharField(
+        write_only=True,
+        required=False,
+        max_length=256,
+        trim_whitespace=False,
+    )
 
     def validate_email(self, value):
         value = normalize_email(value)
@@ -87,6 +98,23 @@ class RegisterSerializer(RejectUnknownFieldsMixin, serializers.Serializer):
         if has_scan_first and not attrs.get("governorate"):
             raise serializers.ValidationError(
                 {"governorate": ["This field is required for scan-first registration."]}
+            )
+        if has_scan_first and not attrs.get("registration_session"):
+            raise serializers.ValidationError(
+                {
+                    "registration_session": [
+                        "Email verification is required for scan-first "
+                        "registration."
+                    ]
+                }
+            )
+        if has_legacy and attrs.get("registration_session"):
+            raise serializers.ValidationError(
+                {
+                    "registration_session": [
+                        "This field is not allowed for manual registration."
+                    ]
+                }
             )
         try:
             validate_password(attrs["password"], user=User(email=attrs["email"]))

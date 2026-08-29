@@ -8,6 +8,7 @@ synthetic payload, so no PaddleOCR runs.
 
 import hashlib
 import io
+import re
 
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -140,6 +141,11 @@ def eager_settings(settings):
     settings.CELERY_TASK_EAGER_PROPAGATES = True
     settings.REGISTRATION_IDENTITY_TTL_SECONDS = 30 * 60
     settings.REGISTRATION_IDENTITY_CACHE_TTL_SECONDS = 30 * 60
+    settings.REGISTRATION_SESSION_TTL_SECONDS = 24 * 60 * 60
+    # Multiple jobs in one test reuse the same synthetic target email; a real
+    # 60s cooldown would break the OTP-issue helper. Cooldown is exercised by
+    # the dedicated email-verification test file instead.
+    settings.OTP_RESEND_COOLDOWN_SECONDS = 0
 
 
 def _auth(user):
@@ -155,13 +161,11 @@ def _auth(user):
 
 @pytest.mark.django_db
 def test_extract_public_no_jwt_required(api_client):
-    resp = api_client.post(
-        EXTRACT,
-        {
-            "document_type": "UNIFIED_NATIONAL_CARD",
-            "front_image": synthetic_png(),
-            "back_image": synthetic_png(),
-        },
+    resp = _extract(
+        api_client,
+        document_type="UNIFIED_NATIONAL_CARD",
+        front_image=synthetic_png(),
+        back_image=synthetic_png(),
     )
     assert resp.status_code == 202
     data = resp.json()["data"]
@@ -173,35 +177,32 @@ def test_extract_public_no_jwt_required(api_client):
 @pytest.mark.django_db
 def test_extract_rejects_bad_image(api_client):
     bad = SimpleUploadedFile("bad.txt", b"not an image", content_type="text/plain")
-    resp = api_client.post(
-        EXTRACT,
-        {
-            "document_type": "UNIFIED_NATIONAL_CARD",
-            "front_image": bad,
-            "back_image": synthetic_png(),
-        },
+    resp = _extract(
+        api_client,
+        document_type="UNIFIED_NATIONAL_CARD",
+        front_image=bad,
+        back_image=synthetic_png(),
     )
     assert resp.status_code == 400
 
 
 @pytest.mark.django_db
 def test_extract_phase1_rejects_passport(api_client):
-    resp = api_client.post(
-        EXTRACT,
-        {
-            "document_type": "PASSPORT",
-            "front_image": synthetic_png(),
-            "back_image": synthetic_png(),
-        },
+    resp = _extract(
+        api_client,
+        document_type="PASSPORT",
+        front_image=synthetic_png(),
+        back_image=synthetic_png(),
     )
     assert resp.status_code == 400
 
 
 @pytest.mark.django_db
 def test_extract_back_required(api_client):
-    resp = api_client.post(
-        EXTRACT,
-        {"document_type": "UNIFIED_NATIONAL_CARD", "front_image": synthetic_png()},
+    resp = _extract(
+        api_client,
+        document_type="UNIFIED_NATIONAL_CARD",
+        front_image=synthetic_png(),
     )
     assert resp.status_code == 400
 
@@ -220,13 +221,11 @@ def test_extract_throttle_scope(api_client):
 
 @pytest.mark.django_db
 def test_token_not_stored_plaintext(api_client):
-    resp = api_client.post(
-        EXTRACT,
-        {
-            "document_type": "UNIFIED_NATIONAL_CARD",
-            "front_image": synthetic_png(),
-            "back_image": synthetic_png(),
-        },
+    resp = _extract(
+        api_client,
+        document_type="UNIFIED_NATIONAL_CARD",
+        front_image=synthetic_png(),
+        back_image=synthetic_png(),
     )
     data = resp.json()["data"]
     job = RegistrationIdentityExtractionJob.objects.get(uuid=data["job_id"])
@@ -239,13 +238,11 @@ def test_token_not_stored_plaintext(api_client):
 
 @pytest.mark.django_db
 def test_poll_requires_token(api_client):
-    resp = api_client.post(
-        EXTRACT,
-        {
-            "document_type": "UNIFIED_NATIONAL_CARD",
-            "front_image": synthetic_png(),
-            "back_image": synthetic_png(),
-        },
+    resp = _extract(
+        api_client,
+        document_type="UNIFIED_NATIONAL_CARD",
+        front_image=synthetic_png(),
+        back_image=synthetic_png(),
     )
     job_id = resp.json()["data"]["job_id"]
     resp = api_client.get(f"{EXTRACT}{job_id}/")
@@ -254,13 +251,11 @@ def test_poll_requires_token(api_client):
 
 @pytest.mark.django_db
 def test_poll_wrong_token_denied_no_leak(api_client):
-    resp = api_client.post(
-        EXTRACT,
-        {
-            "document_type": "UNIFIED_NATIONAL_CARD",
-            "front_image": synthetic_png(),
-            "back_image": synthetic_png(),
-        },
+    resp = _extract(
+        api_client,
+        document_type="UNIFIED_NATIONAL_CARD",
+        front_image=synthetic_png(),
+        back_image=synthetic_png(),
     )
     job_id = resp.json()["data"]["job_id"]
     resp = api_client.get(
@@ -280,13 +275,11 @@ def test_poll_wrong_token_denied_no_leak(api_client):
 @pytest.mark.django_db
 def test_poll_other_job_token_denied(api_client):
     def create():
-        r = api_client.post(
-            EXTRACT,
-            {
-                "document_type": "UNIFIED_NATIONAL_CARD",
-                "front_image": synthetic_png(),
-                "back_image": synthetic_png(),
-            },
+        r = _extract(
+            api_client,
+            document_type="UNIFIED_NATIONAL_CARD",
+            front_image=synthetic_png(),
+            back_image=synthetic_png(),
         )
         return r.json()["data"]
 
@@ -301,13 +294,11 @@ def test_poll_other_job_token_denied(api_client):
 
 @pytest.mark.django_db
 def test_poll_correct_token_success(api_client):
-    resp = api_client.post(
-        EXTRACT,
-        {
-            "document_type": "UNIFIED_NATIONAL_CARD",
-            "front_image": synthetic_png(),
-            "back_image": synthetic_png(),
-        },
+    resp = _extract(
+        api_client,
+        document_type="UNIFIED_NATIONAL_CARD",
+        front_image=synthetic_png(),
+        back_image=synthetic_png(),
     )
     data = resp.json()["data"]
     resp = api_client.get(
@@ -331,13 +322,11 @@ def test_poll_correct_token_success(api_client):
 
 @pytest.mark.django_db
 def test_expired_job_poll_410(api_client):
-    resp = api_client.post(
-        EXTRACT,
-        {
-            "document_type": "UNIFIED_NATIONAL_CARD",
-            "front_image": synthetic_png(),
-            "back_image": synthetic_png(),
-        },
+    resp = _extract(
+        api_client,
+        document_type="UNIFIED_NATIONAL_CARD",
+        front_image=synthetic_png(),
+        back_image=synthetic_png(),
     )
     data = resp.json()["data"]
     job = RegistrationIdentityExtractionJob.objects.get(uuid=data["job_id"])
@@ -357,13 +346,11 @@ def test_expired_job_poll_410(api_client):
 
 @pytest.mark.django_db
 def test_cleanup_sweep_removes_expired(api_client):
-    resp = api_client.post(
-        EXTRACT,
-        {
-            "document_type": "UNIFIED_NATIONAL_CARD",
-            "front_image": synthetic_png(),
-            "back_image": synthetic_png(),
-        },
+    resp = _extract(
+        api_client,
+        document_type="UNIFIED_NATIONAL_CARD",
+        front_image=synthetic_png(),
+        back_image=synthetic_png(),
     )
     data = resp.json()["data"]
     from datetime import timedelta
@@ -387,7 +374,39 @@ def test_cleanup_sweep_removes_expired(api_client):
 # --------------------------------------------------------------------------- #
 
 
-def _successful_job(api_client):
+def _verified_session(api_client, email="synth.reg@example.invalid"):
+    """Start + verify an M31B registration email session; returns the token."""
+    from django.core import mail as _mail
+
+    _mail.outbox.clear()
+    resp = api_client.post(
+        "/api/v1/auth/register/email/start/", {"email": email}, format="json"
+    )
+    assert resp.status_code == 201, resp.content
+    token = resp.json()["data"]["session_token"]
+    code = re.search(r"\n\n(\d{6})\n\n", _mail.outbox[-1].body).group(1)
+    vresp = api_client.post(
+        "/api/v1/auth/register/email/verify/",
+        {"session_token": token, "code": code},
+        format="json",
+    )
+    assert vresp.status_code == 200, vresp.content
+    return token
+
+
+def _extract(api_client, *, email="synth.reg@example.invalid", **payload):
+    """POST extract with a fresh verified session for `email`."""
+    return api_client.post(
+        EXTRACT,
+        payload,
+        headers={
+            "X-Registration-Session-Token": _verified_session(api_client, email)
+        },
+    )
+
+
+def _successful_job(api_client, email="synth.reg@example.invalid"):
+    session_token = _verified_session(api_client, email)
     resp = api_client.post(
         EXTRACT,
         {
@@ -395,17 +414,19 @@ def _successful_job(api_client):
             "front_image": synthetic_png(),
             "back_image": synthetic_png(),
         },
+        headers={"X-Registration-Session-Token": session_token},
     )
     data = resp.json()["data"]
     job = RegistrationIdentityExtractionJob.objects.get(uuid=data["job_id"])
     assert job.status == RegistrationIdentityExtractionJob.Status.SUCCESS
-    return data["job_id"], data["job_token"]
+    return data["job_id"], data["job_token"], session_token
 
 
 def _register(
     api_client,
     job_id,
     token,
+    session_token,
     *,
     email="synth.reg@example.invalid",
     password="StrongPass123!",
@@ -419,6 +440,7 @@ def _register(
             "email": email,
             "password": password,
             "governorate": "BAGHDAD",
+            "registration_session": session_token,
             "registration_identity": payload,
         },
         format="json",
@@ -427,6 +449,7 @@ def _register(
 
 @pytest.mark.django_db
 def test_scan_first_register_full_lifecycle(api_client):
+    session_token = _verified_session(api_client)
     resp = api_client.post(
         EXTRACT,
         {
@@ -434,13 +457,16 @@ def test_scan_first_register_full_lifecycle(api_client):
             "front_image": synthetic_png(),
             "back_image": synthetic_png(),
         },
+        headers={"X-Registration-Session-Token": session_token},
     )
     data = resp.json()["data"]
     job = RegistrationIdentityExtractionJob.objects.get(uuid=data["job_id"])
     assert job.status == RegistrationIdentityExtractionJob.Status.SUCCESS
     front_key, back_key = job.front_key, job.back_key
 
-    resp = _register(api_client, data["job_id"], data["job_token"])
+    resp = _register(
+        api_client, data["job_id"], data["job_token"], session_token
+    )
     assert resp.status_code == 201, resp.content
 
     user = User.objects.get(email="synth.reg@example.invalid")
@@ -510,21 +536,25 @@ def test_scan_first_register_full_lifecycle(api_client):
 
 @pytest.mark.django_db
 def test_job_replay_denied_after_success(api_client):
-    job_id, token = _successful_job(api_client)
-    assert _register(api_client, job_id, token).status_code == 201
+    job_id, token, session_token = _successful_job(api_client)
+    assert _register(api_client, job_id, token, session_token).status_code == 201
     # Second attempt with the same (now consumed) capability -> 409/404.
-    resp = _register(api_client, job_id, token, email="other@example.invalid")
+    resp = _register(
+        api_client, job_id, token, session_token, email="other@example.invalid"
+    )
     assert resp.status_code in (409, 404)
 
 
 @pytest.mark.django_db
 def test_duplicate_email_does_not_consume_job(api_client):
-    job_id, token = _successful_job(api_client)
-    assert _register(api_client, job_id, token).status_code == 201
+    job_id, token, session_token = _successful_job(api_client)
+    assert _register(api_client, job_id, token, session_token).status_code == 201
 
     # Fresh job; register with the duplicate email -> 400, job NOT consumed.
-    job2_id, token2 = _successful_job(api_client)
-    resp = _register(api_client, job2_id, token2, email="synth.reg@example.invalid")
+    job2_id, token2, session2 = _successful_job(api_client)
+    resp = _register(
+        api_client, job2_id, token2, session2, email="synth.reg@example.invalid"
+    )
     assert resp.status_code == 400
     job2 = RegistrationIdentityExtractionJob.objects.get(uuid=job2_id)
     assert job2.status != RegistrationIdentityExtractionJob.Status.FINALIZED
@@ -533,8 +563,10 @@ def test_duplicate_email_does_not_consume_job(api_client):
 
 @pytest.mark.django_db
 def test_under18_dob_rejected(api_client):
-    job_id, token = _successful_job(api_client)
-    resp = _register(api_client, job_id, token, date_of_birth="2014-03-24")
+    job_id, token, session_token = _successful_job(api_client)
+    resp = _register(
+        api_client, job_id, token, session_token, date_of_birth="2014-03-24"
+    )
     assert resp.status_code == 400
     job = RegistrationIdentityExtractionJob.objects.get(uuid=job_id)
     assert job.status != RegistrationIdentityExtractionJob.Status.FINALIZED
@@ -542,8 +574,8 @@ def test_under18_dob_rejected(api_client):
 
 @pytest.mark.django_db
 def test_bad_confirmed_fields_do_not_consume_job(api_client):
-    job_id, token = _successful_job(api_client)
-    resp = _register(api_client, job_id, token, nationality="XYZ")
+    job_id, token, session_token = _successful_job(api_client)
+    resp = _register(api_client, job_id, token, session_token, nationality="XYZ")
     assert resp.status_code == 400
     assert (
         RegistrationIdentityExtractionJob.objects.get(uuid=job_id).status
@@ -600,9 +632,9 @@ def test_storage_promotion_failure_no_partial_account(api_client, monkeypatch):
         raise RuntimeError("storage down")
 
     monkeypatch.setattr("registration.services._create_document", boom)
-    job_id, token = _successful_job(api_client)
+    job_id, token, session_token = _successful_job(api_client)
     with pytest.raises(RuntimeError):
-        _register(api_client, job_id, token)
+        _register(api_client, job_id, token, session_token)
     # No partial account/profile; job NOT consumed; staging preserved.
     assert not User.objects.filter(email="synth.reg@example.invalid").exists()
     assert not PatientProfile.objects.exists()
@@ -612,8 +644,8 @@ def test_storage_promotion_failure_no_partial_account(api_client, monkeypatch):
 
 @pytest.mark.django_db
 def test_wrong_document_type_mismatch(api_client):
-    job_id, token = _successful_job(api_client)
-    resp = _register(api_client, job_id, token, document_type="PASSPORT")
+    job_id, token, session_token = _successful_job(api_client)
+    resp = _register(api_client, job_id, token, session_token, document_type="PASSPORT")
     assert resp.status_code in (400, 409)
     assert (
         RegistrationIdentityExtractionJob.objects.get(uuid=job_id).status
@@ -623,7 +655,9 @@ def test_wrong_document_type_mismatch(api_client):
 
 @pytest.mark.django_db
 def test_four_identifiers_stay_distinct(api_client):
-    job_id, token = _successful_job(api_client)
+    job_id, token, session_token = _successful_job(
+        api_client, email="distinct@example.invalid"
+    )
     payload = confirmed_identity(job_id, token)
     payload["document_number"] = "DOC-ALPHA-1"
     payload["national_card_number"] = "NAT-BETA-2"
@@ -635,6 +669,7 @@ def test_four_identifiers_stay_distinct(api_client):
             "email": "distinct@example.invalid",
             "password": "StrongPass123!",
             "governorate": "BASRA",
+            "registration_session": session_token,
             "registration_identity": payload,
         },
         format="json",
@@ -650,12 +685,13 @@ def test_four_identifiers_stay_distinct(api_client):
 
 @pytest.mark.django_db
 def test_governorate_required_for_scan_first(api_client):
-    job_id, token = _successful_job(api_client)
+    job_id, token, session_token = _successful_job(api_client)
     resp = api_client.post(
         REGISTER,
         {
             "email": "nogovern@example.invalid",
             "password": "StrongPass123!",
+            "registration_session": session_token,
             "registration_identity": confirmed_identity(job_id, token),
         },
         format="json",
@@ -669,7 +705,7 @@ def test_governorate_required_for_scan_first(api_client):
 
 @pytest.mark.django_db
 def test_confirmation_required_and_must_be_true(api_client):
-    job_id, token = _successful_job(api_client)
+    job_id, token, session_token = _successful_job(api_client)
     payload = confirmed_identity(job_id, token)
     payload["confirmation"] = False
     resp = api_client.post(
@@ -678,6 +714,7 @@ def test_confirmation_required_and_must_be_true(api_client):
             "email": "noconfirm@example.invalid",
             "password": "StrongPass123!",
             "governorate": "ERBIL",
+            "registration_session": session_token,
             "registration_identity": payload,
         },
         format="json",
@@ -689,8 +726,8 @@ def test_confirmation_required_and_must_be_true(api_client):
 
 @pytest.mark.django_db
 def test_empty_structured_name_rejected(api_client):
-    job_id, token = _successful_job(api_client)
-    resp = _register(api_client, job_id, token, name="   ")
+    job_id, token, session_token = _successful_job(api_client)
+    resp = _register(api_client, job_id, token, session_token, name="   ")
     assert resp.status_code == 400
     assert (
         RegistrationIdentityExtractionJob.objects.get(uuid=job_id).status
@@ -700,12 +737,12 @@ def test_empty_structured_name_rejected(api_client):
 
 @pytest.mark.django_db
 def test_duplicate_national_card_number_rejected(api_client):
-    job_id, token = _successful_job(api_client)
-    assert _register(api_client, job_id, token).status_code == 201
+    job_id, token, session_token = _successful_job(api_client)
+    assert _register(api_client, job_id, token, session_token).status_code == 201
 
     # Same card number on a fresh job -> safe conflict, no account, job kept.
-    job2_id, token2 = _successful_job(api_client)
-    resp = _register(api_client, job2_id, token2, email="dup@example.invalid")
+    job2_id, token2, session2 = _successful_job(api_client, email="dup@example.invalid")
+    resp = _register(api_client, job2_id, token2, session2, email="dup@example.invalid")
     assert resp.status_code == 400
     assert not User.objects.filter(email="dup@example.invalid").exists()
     assert (
@@ -716,10 +753,12 @@ def test_duplicate_national_card_number_rejected(api_client):
 
 @pytest.mark.django_db
 def test_duplicate_card_body_number_rejected(api_client):
-    job_id, token = _successful_job(api_client)
-    assert _register(api_client, job_id, token).status_code == 201
+    job_id, token, session_token = _successful_job(api_client)
+    assert _register(api_client, job_id, token, session_token).status_code == 201
 
-    job2_id, token2 = _successful_job(api_client)
+    job2_id, token2, session2 = _successful_job(
+        api_client, email="dupbody@example.invalid"
+    )
     payload = confirmed_identity(job2_id, token2)
     payload["document_number"] = "777777777777"
     payload["national_card_number"] = "777777777777"
@@ -730,6 +769,7 @@ def test_duplicate_card_body_number_rejected(api_client):
             "email": "dupbody@example.invalid",
             "password": "StrongPass123!",
             "governorate": "NAJAF",
+            "registration_session": session2,
             "registration_identity": payload,
         },
         format="json",
@@ -742,11 +782,17 @@ def test_duplicate_card_body_number_rejected(api_client):
 def test_family_number_duplicates_allowed_no_relationship(api_client):
     from guardians.models import GuardianRelationship
 
-    job_id, token = _successful_job(api_client)
-    resp_a = _register(api_client, job_id, token, email="famA@example.invalid")
+    job_id, token, session_token = _successful_job(
+        api_client, email="famA@example.invalid"
+    )
+    resp_a = _register(
+        api_client, job_id, token, session_token, email="famA@example.invalid"
+    )
     assert resp_a.status_code == 201
 
-    job2_id, token2 = _successful_job(api_client)
+    job2_id, token2, session2 = _successful_job(
+        api_client, email="famB@example.invalid"
+    )
     payload = confirmed_identity(job2_id, token2)
     payload["document_number"] = "888888888888"
     payload["national_card_number"] = "888888888888"
@@ -757,6 +803,7 @@ def test_family_number_duplicates_allowed_no_relationship(api_client):
             "email": "famB@example.invalid",
             "password": "StrongPass123!",
             "governorate": "BAGHDAD",
+            "registration_session": session2,
             "registration_identity": payload,
         },
         format="json",
@@ -782,7 +829,9 @@ def test_arabic_names_alphanumeric_family_and_g_body_accepted(api_client):
     body number must all pass validation and persist unchanged. Password is
     stored hashed, never plaintext.
     """
-    job_id, token = _successful_job(api_client)
+    job_id, token, session_token = _successful_job(
+        api_client, email="arabic.synth@example.invalid"
+    )
     payload = confirmed_identity(job_id, token)
     payload.update(
         {
@@ -801,6 +850,7 @@ def test_arabic_names_alphanumeric_family_and_g_body_accepted(api_client):
             "email": "arabic.synth@example.invalid",
             "password": "StrongPass123!",
             "governorate": "NAJAF",
+            "registration_session": session_token,
             "registration_identity": payload,
         },
         format="json",
@@ -829,8 +879,8 @@ def test_registration_pending_card_blocks_normal_duplicate(api_client):
     identity endpoint is 409 identity_document_conflict and creates no doc.
     Regression for the "registration identity + normal endpoint" loophole.
     """
-    job_id, token = _successful_job(api_client)
-    assert _register(api_client, job_id, token).status_code == 201
+    job_id, token, session_token = _successful_job(api_client)
+    assert _register(api_client, job_id, token, session_token).status_code == 201
     user = User.objects.get(email="synth.reg@example.invalid")
     profile = PatientProfile.objects.get(user=user)
     doc = IdentityDocument.objects.get(patient=profile)

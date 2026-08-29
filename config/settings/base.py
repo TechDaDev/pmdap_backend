@@ -296,6 +296,12 @@ OTP_ISSUE_RATE_WINDOW_SECONDS = int(
 OTP_ISSUE_LIMIT_TARGET = int(os.getenv("OTP_ISSUE_LIMIT_TARGET", "5"))
 OTP_ISSUE_LIMIT_ACCOUNT = int(os.getenv("OTP_ISSUE_LIMIT_ACCOUNT", "10"))
 OTP_ISSUE_LIMIT_SOURCE = int(os.getenv("OTP_ISSUE_LIMIT_SOURCE", "20"))
+# Pre-registration email-verification session lifetime (M31B). Generous so a
+# user can resume a registration (e.g. after leaving to read the OTP email);
+# OTP freshness is enforced independently by the OTP core TTL/cooldown.
+REGISTRATION_SESSION_TTL_SECONDS = int(
+    os.getenv("REGISTRATION_SESSION_TTL_SECONDS", str(24 * 60 * 60))
+)
 
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 RESEND_FROM_EMAIL = os.getenv("RESEND_FROM_EMAIL", "onboarding@resend.dev")
@@ -330,6 +336,11 @@ REST_FRAMEWORK = {
         # dedicated anonymous scopes.
         "registration_identity_extract": "10/minute",
         "registration_identity_poll": "60/minute",
+        # M31B anonymous pre-registration email verification.
+        "registration_email_start": "5/hour",
+        "registration_email_resend": "5/minute",
+        "registration_email_verify": "10/minute",
+        "registration_email_status": "60/minute",
         "account_claim_submit": "5/hour",
         "account_claim_activation": "10/hour",
         "medical_document_upload": "20/hour",

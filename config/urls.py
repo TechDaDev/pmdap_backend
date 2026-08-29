@@ -12,6 +12,10 @@ urlpatterns = [
         "api/v1/auth/register/identity/",
         include("registration.urls"),
     ),
+    path(
+        "api/v1/auth/register/email/",
+        include("registration.email_urls"),
+    ),
     path("api/v1/account-claims/", include("claims.urls")),
     path("api/v1/archive/", include("archive.urls")),
     path("api/v1/search/", include("archive.search_urls")),

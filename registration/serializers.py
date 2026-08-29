@@ -23,6 +23,43 @@ class RejectUnknownFieldsMixin:
         return super().to_internal_value(data)
 
 
+class RegistrationEmailStartSerializer(
+    RejectUnknownFieldsMixin, serializers.Serializer
+):
+    """Account-details step of the M31B pre-registration flow.
+
+    The email is validated and normalized here; the password is deliberately
+    NOT accepted at this step (it stays client-side until the final register).
+    """
+
+    email = serializers.EmailField()
+    phone = serializers.CharField(required=False, allow_blank=True, max_length=32)
+    governorate = serializers.ChoiceField(
+        choices=PatientProfile.Governorate.choices, required=False
+    )
+
+
+class RegistrationEmailResendSerializer(
+    RejectUnknownFieldsMixin, serializers.Serializer
+):
+    session_token = serializers.CharField(max_length=256, trim_whitespace=False)
+
+
+class RegistrationEmailVerifySerializer(
+    RejectUnknownFieldsMixin, serializers.Serializer
+):
+    session_token = serializers.CharField(max_length=256, trim_whitespace=False)
+    code = serializers.CharField(max_length=8, trim_whitespace=False)
+
+    def validate_code(self, value):
+        value = value.strip()
+        if not value.isdigit() or len(value) != 6:
+            raise serializers.ValidationError(
+                "The verification code must be 6 digits."
+            )
+        return value
+
+
 class RegistrationIdentityExtractRequestSerializer(
     RejectUnknownFieldsMixin, serializers.Serializer
 ):

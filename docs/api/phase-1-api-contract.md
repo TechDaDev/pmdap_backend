@@ -43,6 +43,21 @@ Source of truth for machine-readable details is the live OpenAPI schema:
 | GET | `/api/v1/auth/me/` | JWT | 200 public user |
 | POST | `/api/v1/auth/activate-claimed-account/` | public (throttled) | claim activation |
 
+`Registration email verification (M31B)` — public, anonymous, throttled; capability-bound.
+
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/api/v1/auth/register/email/start/` | account details → creates session + sends OTP; returns `session_token` once + masked email |
+| POST | `/api/v1/auth/register/email/resend/` | resends OTP (core cooldown/limits) |
+| POST | `/api/v1/auth/register/email/verify/` | verifies OTP; marks session `EMAIL_VERIFIED` |
+| GET | `/api/v1/auth/register/email/status/` | resume; `X-Registration-Session-Token` header |
+| POST | `/api/v1/auth/register/identity/extract/` | **requires** `X-Registration-Session-Token` of an `EMAIL_VERIFIED` session (403 otherwise) |
+| POST | `/api/v1/auth/register/` | scan-first now also requires `registration_session` (verified capability) |
+
+Purpose and OTP target are always chosen server-side (`EMAIL_VERIFICATION`, the
+session's own email). The client can never assert verification (`verified`,
+`email_verified` fields are rejected); the flag is derived from the session row.
+
 `Patients` — requires: JWT + PATIENT role.
 
 | Method | Path | Notes |

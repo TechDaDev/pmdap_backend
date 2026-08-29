@@ -21,6 +21,7 @@ PUBLIC_USER_FIELDS = {
     "phone",
     "role",
     "email_verified",
+    "email_verified_at",
     "phone_verified",
     "can_verify_identity",
     "created_at",

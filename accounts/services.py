@@ -22,6 +22,7 @@ def register_account(
     phone="",
     governorate="",
     registration_identity=None,
+    registration_session=None,
 ):
     if registration_identity is not None:
         from registration.services import finalize_scan_first_registration
@@ -32,6 +33,7 @@ def register_account(
             phone=phone,
             governorate=governorate,
             registration_identity=registration_identity,
+            registration_session=registration_session,
         )
     if patient is None:
         raise serializers.ValidationError(

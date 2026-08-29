@@ -21,3 +21,35 @@ class RegistrationIdentityPollRateThrottle(DynamicScopedRateThrottle):
     def get_cache_key(self, request, view):
         view.throttle_scope = self.scope
         return super().get_cache_key(request, view)
+
+
+class RegistrationEmailStartRateThrottle(DynamicScopedRateThrottle):
+    scope = "registration_email_start"
+
+    def get_cache_key(self, request, view):
+        view.throttle_scope = self.scope
+        return super().get_cache_key(request, view)
+
+
+class RegistrationEmailResendRateThrottle(DynamicScopedRateThrottle):
+    scope = "registration_email_resend"
+
+    def get_cache_key(self, request, view):
+        view.throttle_scope = self.scope
+        return super().get_cache_key(request, view)
+
+
+class RegistrationEmailVerifyRateThrottle(DynamicScopedRateThrottle):
+    scope = "registration_email_verify"
+
+    def get_cache_key(self, request, view):
+        view.throttle_scope = self.scope
+        return super().get_cache_key(request, view)
+
+
+class RegistrationEmailStatusRateThrottle(DynamicScopedRateThrottle):
+    scope = "registration_email_status"
+
+    def get_cache_key(self, request, view):
+        view.throttle_scope = self.scope
+        return super().get_cache_key(request, view)

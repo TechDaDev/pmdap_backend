@@ -25,6 +25,19 @@ class AuditLog(UUIDModel):
         OTP_FAILED = "OTP_FAILED", "OTP failed"
         OTP_LOCKED = "OTP_LOCKED", "OTP locked"
         OTP_CONSUMED = "OTP_CONSUMED", "OTP consumed"
+        # Registration email verification
+        REGISTRATION_SESSION_CREATED = (
+            "REGISTRATION_SESSION_CREATED",
+            "Registration session created",
+        )
+        REGISTRATION_EMAIL_VERIFIED = (
+            "REGISTRATION_EMAIL_VERIFIED",
+            "Registration email verified",
+        )
+        REGISTRATION_SESSION_FINALIZED = (
+            "REGISTRATION_SESSION_FINALIZED",
+            "Registration session finalized",
+        )
         # Identity
         IDENTITY_DOCUMENT_UPLOADED = (
             "IDENTITY_DOCUMENT_UPLOADED",

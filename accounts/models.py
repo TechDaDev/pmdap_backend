@@ -30,6 +30,9 @@ class User(AbstractUser):
     role = models.CharField(max_length=32, choices=Role, default=Role.PATIENT)
     status = models.CharField(max_length=24, choices=Status, default=Status.PENDING)
     email_verified = models.BooleanField(default=False)
+    # Authoritative timestamp set only server-side when a registration
+    # completes with a verified email (M31B). Null for grandfathered accounts.
+    email_verified_at = models.DateTimeField(null=True, blank=True)
     phone_verified = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

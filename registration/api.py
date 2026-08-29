@@ -13,8 +13,15 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.serializers import ErrorEnvelopeSerializer
-from registration.exceptions import RegistrationIdentityJobExpired
-from registration.models import RegistrationIdentityExtractionJob
+from registration.email_services import load_session_for_capability
+from registration.exceptions import (
+    RegistrationEmailNotVerified,
+    RegistrationIdentityJobExpired,
+)
+from registration.models import (
+    RegistrationIdentityExtractionJob,
+    RegistrationSession,
+)
 from registration.serializers import (
     RegistrationIdentityExtractRequestSerializer,
     RegistrationIdentityStatusSerializer,
@@ -59,24 +66,32 @@ class RegistrationIdentityExtractView(APIView):
                 ),
             ),
             400: ErrorEnvelopeSerializer,
+            403: ErrorEnvelopeSerializer,
             429: ErrorEnvelopeSerializer,
             503: ErrorEnvelopeSerializer,
         },
         tags=["Registration"],
         description=(
-            "Public scan-first extraction. Upload the Unified National Card "
-            "front/back ONCE. Returns a capability (job_id + job_token) for "
-            "polling and final registration. Extracted values are advisory "
-            "only and must be human-reviewed."
+            "Public scan-first extraction. Requires an email-verified "
+            "registration session capability in the X-Registration-Session-"
+            "Token header (M31B). Upload the Unified National Card front/back "
+            "ONCE. Returns a capability (job_id + job_token) for polling and "
+            "final registration. Extracted values are advisory only and must "
+            "be human-reviewed."
         ),
     )
     def post(self, request):
         serializer = RegistrationIdentityExtractRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        session_token = request.headers.get("X-Registration-Session-Token") or ""
+        session = load_session_for_capability(session_token)
+        if session.status != RegistrationSession.Status.EMAIL_VERIFIED:
+            raise RegistrationEmailNotVerified()
         job, token = issue_registration_job(
             document_type=serializer.validated_data["document_type"],
             front_upload=serializer.validated_data["front_image"],
             back_upload=serializer.validated_data["back_image"],
+            session=session,
         )
         process_registration_identity_extraction.delay(str(job.uuid))
         return Response(

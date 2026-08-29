@@ -89,15 +89,23 @@ def clear_registration_result(job_uuid):
     cache.delete(f"{CACHE_PREFIX}{job_uuid}")
 
 
-def issue_registration_job(*, document_type, front_upload, back_upload):
+def issue_registration_job(
+    *,
+    document_type,
+    front_upload,
+    back_upload,
+    session=None,
+):
     """Create a capability-bound registration extraction session.
 
     Images are staged once. Returns (job, job_token); the token is returned to
-    the client exactly once, only its digest is stored.
+    the client exactly once, only its digest is stored. ``session`` is the
+    email-verified registration session (M31B) the job is bound to.
     """
     token = secrets.token_urlsafe(48)
     job = RegistrationIdentityExtractionJob.objects.create(
         capability_digest=_digest(token),
+        session=session,
         document_type=document_type,
         expires_at=timezone.now()
         + timedelta(seconds=settings.REGISTRATION_IDENTITY_TTL_SECONDS),
@@ -174,17 +182,33 @@ def _check_identity_conflicts(identity):
 
 @transaction.atomic
 def finalize_scan_first_registration(
-    *, email, password, phone, governorate, registration_identity
+    *,
+    email,
+    password,
+    phone,
+    governorate,
+    registration_identity,
+    registration_session=None,
 ):
     """Atomically create User + PatientProfile + pending IdentityDocument.
 
     The capability is validated inside the transaction (select_for_update).
     On any failure the account and document are rolled back and the session is
     NOT consumed, so the client can correct and retry while the TTL is valid.
+
+    ``registration_session`` is the M31B email-verification capability token:
+    the session must be EMAIL_VERIFIED, unexpired, and its email must match
+    ``email``. On success the user is stamped email-verified.
     """
     user_model = get_user_model()
     job_id = registration_identity["job_id"]
     token = registration_identity["job_token"]
+
+    from registration.email_services import check_session_for_finalize
+
+    session = check_session_for_finalize(
+        session_token=registration_session or "", email=email
+    )
 
     job = (
         RegistrationIdentityExtractionJob.objects.select_for_update()
@@ -206,6 +230,10 @@ def finalize_scan_first_registration(
         raise RegistrationIdentityJobConflict()
     if job.document_type != registration_identity["document_type"]:
         raise RegistrationIdentityJobConflict()
+    # The job must have been created under this exact session (defense in
+    # depth against cross-session token mixing).
+    if job.session_id is not None and job.session_id != session.pk:
+        raise RegistrationIdentityJobConflict()
 
     # Per-card duplicate protection (family_number excluded by design).
     _check_identity_conflicts(registration_identity)
@@ -220,7 +248,8 @@ def finalize_scan_first_registration(
             is_active=True,
             is_staff=False,
             is_superuser=False,
-            email_verified=False,
+            email_verified=True,
+            email_verified_at=timezone.now(),
             phone_verified=False,
         )
     except IntegrityError as exc:
@@ -303,6 +332,20 @@ def finalize_scan_first_registration(
     # Single-use consumption, committed atomically with the account+document.
     job.status = RegistrationIdentityExtractionJob.Status.FINALIZED
     job.save(update_fields=["status", "updated_at"])
+
+    # The verified registration session is consumed in the same transaction.
+    from registration.models import RegistrationSession
+
+    session.status = RegistrationSession.Status.FINALIZED
+    session.finalized_at = timezone.now()
+    session.save(update_fields=["status", "finalized_at", "updated_at"])
+    record_audit(
+        action=AuditLog.Action.REGISTRATION_SESSION_FINALIZED,
+        actor=user,
+        resource_type="REGISTRATION_SESSION",
+        resource_uuid=session.uuid,
+        metadata={"status": session.status},
+    )
 
     # Post-commit: remove staging + cached result + consumed row. On rollback
     # this never runs, so staging is preserved for a safe retry.
