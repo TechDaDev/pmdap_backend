@@ -1,11 +1,15 @@
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 import resend
 from django.conf import settings
 from django.core.mail import send_mail
+from resend.exceptions import ResendError
 
-from otp.exceptions import OtpProviderError
+from otp.exceptions import OtpProviderError, OtpRateLimited
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -50,7 +54,28 @@ class ResendOtpDeliveryService(OtpDeliveryService):
         }
         try:
             response = resend.Emails.send(params)
-        except Exception:
+        except ResendError as exc:
+            # Provider rejected the send. Resend API error messages never echo
+            # the OTP code or the recipient address, so logging the provider's
+            # code/type/message is safe and gives ops a real root cause. A
+            # rate-limit or daily-quota rejection (HTTP 429) is retryable and
+            # maps to the OTP rate-limited signal so the API returns a 429
+            # with a retry hint instead of a hard delivery failure. The raw
+            # exception is deliberately NOT chained (its repr may echo the
+            # request body).
+            logger.warning(
+                "OTP email delivery rejected by provider (code=%s type=%s): %s",
+                exc.code,
+                exc.error_type,
+                exc.message,
+            )
+            if str(exc.code) == "429":
+                raise OtpRateLimited() from None
+            raise OtpProviderError("OTP email delivery failed.") from None
+        except Exception as exc:
+            # Transport-level failure. Only the exception type is logged (a
+            # message may echo the request body with the OTP/recipient).
+            logger.warning("OTP email delivery transport error: %s", type(exc).__name__)
             raise OtpProviderError("OTP email delivery failed.") from None
 
         message_id = (

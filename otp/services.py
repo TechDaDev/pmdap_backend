@@ -189,6 +189,16 @@ def issue_otp(
             expires_minutes=ttl_minutes,
             locale=locale,
         )
+    except OtpRateLimited:
+        # Provider rate limit / quota: retryable. Invalidate the undelivered
+        # challenge and propagate the throttled signal (views map it to a 429
+        # with a retry hint) rather than wrapping it as a hard delivery error.
+        OtpChallenge.objects.filter(
+            pk=challenge.pk,
+            consumed_at__isnull=True,
+            invalidated_at__isnull=True,
+        ).update(invalidated_at=timezone.now(), updated_at=timezone.now())
+        raise
     except Exception as exc:
         OtpChallenge.objects.filter(
             pk=challenge.pk,
