@@ -5,6 +5,8 @@ session — never client-controlled. OTP codes are never logged. A session
 capability (``session_token``) is sent in the body for POSTs and in the
 ``X-Registration-Session-Token`` header for the GET status endpoint.
 """
+import logging
+
 from drf_spectacular.utils import extend_schema, inline_serializer
 from rest_framework import serializers, status
 from rest_framework.exceptions import APIException, ValidationError
@@ -38,6 +40,8 @@ from registration.throttles import (
     RegistrationEmailStatusRateThrottle,
     RegistrationEmailVerifyRateThrottle,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def envelope(name, child):
@@ -73,6 +77,18 @@ def _throttled_response(retry_after=None):
             }
         },
         status=status.HTTP_429_TOO_MANY_REQUESTS,
+    )
+
+
+def _log_delivery_cause(exc):
+    """Temporary M31B diagnostics: log the chained provider/SMTP error.
+
+    Logs exception type + message only — never the OTP code or target.
+    """
+    cause = getattr(exc, "__cause__", None)
+    logger.warning(
+        "registration OTP delivery failed: %r",
+        repr(cause) if cause is not None else repr(exc),
     )
 
 
@@ -130,6 +146,7 @@ class RegistrationEmailStartView(APIView):
         except OtpRateLimited:
             return _throttled_response()
         except (OtpDeliveryFailed, OtpProviderError) as exc:
+            _log_delivery_cause(exc)
             raise _DeliveryUnavailable() from exc
         return Response(
             {
@@ -183,6 +200,7 @@ class RegistrationEmailResendView(APIView):
         except OtpRateLimited:
             return _throttled_response()
         except (OtpDeliveryFailed, OtpProviderError) as exc:
+            _log_delivery_cause(exc)
             raise _DeliveryUnavailable() from exc
         status_data = get_registration_status(
             session_token=serializer.validated_data["session_token"]
