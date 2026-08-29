@@ -1,6 +1,27 @@
 from django.contrib import admin
+from django.contrib.admin.widgets import AdminFileWidget
+from django.db import models
 
 from patients.models import PatientProfile
+
+
+class _PrivateAvatarFileInput(AdminFileWidget):
+    """Clearable file input for private-storage avatars.
+
+    Patient avatars live in a private storage that deliberately has no public
+    URL (``PrivateAvatarStorage.url`` raises ``ValueError``). Django's default
+    file widget probes ``value.url`` to render the "Currently: <file>" row,
+    which 500s the admin change page. This widget renders the plain filename
+    and never calls ``storage.url()``.
+    """
+
+    def is_initial(self, value):
+        return bool(value and getattr(value, "name", False))
+
+    def format_value(self, value):
+        if self.is_initial(value):
+            return value.name
+        return None
 
 
 @admin.register(PatientProfile)
@@ -15,6 +36,11 @@ class PatientProfileAdmin(admin.ModelAdmin):
     )
     list_filter = ("identity_status", "sex", "blood_group")
     search_fields = ("digital_id", "full_name", "user__email")
+    # Private avatars have no public URL — render the filename instead of a
+    # link (prevents the change page from 500ing on ``storage.url()``).
+    formfield_overrides = {
+        models.ImageField: {"widget": _PrivateAvatarFileInput},
+    }
     # Immutable identity keys + the service-driven identity_status are always
     # read-only. identity_status transitions happen only through the identity
     # verification service/API (which also writes events + audit + profile
